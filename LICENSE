@@ -2,15 +2,14 @@ Copyright (c) 2026 Alexandre Rollet, Ecole Supérieure d'Ingénieurs Léonard de
 
 All rights reserved.
 
-This repository contains software and documentation developed by the
-as part of the REXUS/BEXUS programme, for the STAR-D experiment.
+This repository contains software and documentation developed by Alexandre Rollet as part of the REXUS/BEXUS programme, for the STAR-D experiment.
 
 Permission is granted to view and download this material for personal,
 educational, and research purposes only.
 
 The following restrictions apply:
 
-The software may not be copied, modified, merged, published,
+The software may not be modified, merged, published,
 distributed, sublicensed, or used in other projects without
 prior written permission from the authors.
 
@@ -25,7 +24,7 @@ EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
 OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
 NONINFRINGEMENT.
 
-This project was developed by students as part of the
+This project was developed as part of the
 REXUS/BEXUS programme supported by ESA, SNSA and DLR.
-The views expressed are those of the authors and do not
+The views expressed are those of the author and do not
 necessarily reflect the official policy of the agencies.

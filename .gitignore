@@ -1,0 +1,31 @@
+# Build artifacts
+build/
+*.o
+*.a
+*.bin
+*.elf
+*.map
+
+# ESP-IDF
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+
+# Python
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+venv/
+.venv/
+*.egg-info/
+
+# Editors and OS
+.DS_Store
+Thumbs.db
+desktop.ini
+compile_commands.json
+
+# Generated diagrams
+docs/diagrams/out/
