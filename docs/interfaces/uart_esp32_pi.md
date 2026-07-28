@@ -84,8 +84,41 @@ Multi-byte integers are **little-endian** throughout.
 | Offset | Field | Type | Size | Notes |
 |---|---|---|---|---|
 | 0 | Camera status | uint8 | 1 B | `camera_status_t` |
-| 1 | SSD storage remaining | uint8 | 1 B | Shown in GB remaining |
+| 1 | SSD storage remaining | uint8 | 1 B | Shown in GB remaining (rounded down) |
 | 2 | Command seq echo | uint8 | 1 B | |
 | 3 | Command result | uint8 | 1 B |  |
 
 *Payload length : 4 bytes*
+
+### 0x04 — SENSOR_DATA (ESP32 → Pi)
+
+| Offset | Field | Type | Size | Scale | Notes |
+|---|---|---|---|---|---|
+| 0 | `EXT_BME_temp` | int16 | 2 B | 0.01 °C | −40…+85 °C |
+| 2 | `EXT_BME_pressure` | uint16 | 2 B | 2 Pa | Below sensor range above ~9 km |
+| 4 | `EXT_BME_humidity` | uint16 | 2 B | 0.01 %RH | 0…100 %RH |
+| 6 | `INT_BME_temp` | int16 | 2 B | 0.01 °C | |
+| 8 | `INT_BME_pressure` | uint16 | 2 B | 2 Pa | Nominal ~1013 hPa; decline indicates PV leak |
+| 10 | `INT_BME_humidity` | uint16 | 2 B | 0.01 %RH | |
+| 12 | `ABP_pressure` | uint16 | 2 B | TBD | **Part number needed** |
+| 14 | `SLF3S_flow` | int16 | 2 B | 1/500 ml/min | Raw sensor word |
+| 16 | `PT100_temp` | int16 | 2 B | 0.01 °C | MFC control temperature |
+| 18 | `IMU_accel_x` | int16 | 2 B | 0.488 mg/LSB | ±16 g full scale |
+| 20 | `IMU_accel_y` | int16 | 2 B | 0.488 mg/LSB | ±16 g full scale |
+| 22 | `IMU_accel_z` | int16 | 2 B | 0.488 mg/LSB | ±16 g full scale |
+| 24 | `IMU_gyro_x` | int16 | 2 B | 70 mdps/LSB (datasheet value) | ±2000 dps full scale |
+| 26 | `IMU_gyro_y` | int16 | 2 B | 70 mdps/LSB | ±2000 dps full scale |
+| 28 | `IMU_gyro_z` | int16 | 2 B | 70 mdps/LSB | ±2000 dps full scale |
+
+Payload length: 30 bytes
+
+## Timing and error handling
+
+| Parameter | Value | Rationale |
+|---|---|---|
+| Baud rate | 115200 | 8N1. Matches the REXUS TCU link rate. |
+| `SENSOR_DATA` period | 100 ms | 10 Hz, matches CSV logging cadence |
+| `POLL` period | 1000 ms | 1 Hz, matches telemetry downlink cadence |
+| Reply timeout | 50 ms | ~25× nominal round trip; absorbs Linux scheduling jitter |
+| Misses to set degraded | 3 consecutive | Tolerates transient jitter; detects a dead Pi within 3 s |
+| Successes to clear degraded | 5 consecutive | Hysteresis — prevents flag flapping on a marginal link |

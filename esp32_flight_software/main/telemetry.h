@@ -102,12 +102,12 @@ typedef struct __attribute__((packed)) {
 
     /* --- payload: temperature (signed: can read below 0) --- */
     int16_t  pt100_temp;      /* MFC fluid temperature */
-    int16_t  internal_temp;   /* BME280, internal */
-    int16_t  external_temp;   /* BME280, external */
+    int16_t  int_bme_temp;   /* BME280, internal */
+    int16_t  ext_bme_temp;   /* BME280, external */
 
     /* --- payload: fluidic */
-    int16_t  slf35_flow;
-    int16_t  abp_pressure;
+    int16_t  slf3s_flow;
+    int16_t  ABP_pressure;
 
     /* --- payload: system health --- */
     uint16_t voltage_mV;                 /* main PCB voltage, millivolts (unsigned: never negative) */

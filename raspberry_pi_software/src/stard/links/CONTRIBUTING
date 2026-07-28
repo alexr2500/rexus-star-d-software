@@ -1,0 +1,1 @@
+All changes made to `protocol.py` must be correlated to the contents of `protocol.h` for the ESP32. Skipping this verification leads to wire transmission errors in the flight computer interface if modifications are made but not duplicated.
