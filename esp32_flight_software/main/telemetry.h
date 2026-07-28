@@ -114,7 +114,7 @@ typedef struct __attribute__((packed)) {
     uint8_t  stepper_motor_activation;   /* 0/1, latched once confirmed after SOE */
     uint8_t  ssd_status;                 /* ssd_status_t */
     uint8_t  camera_status;              /* camera_status_t */
-    uint32_t error_flag;                 /* bitmask, see error_manager.h enum */
+    uint32_t status_error_flag;          /* bitmask, see error_manager.h enum. Extra bytes serve as status flags for indications */
 
     /* --- trailer --- */
     uint16_t crc;                        /* CRC-16/CCITT, see TLM_CRC_COVERAGE_LEN */
