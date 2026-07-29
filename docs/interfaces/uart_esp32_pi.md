@@ -123,3 +123,12 @@ Payload length: 34 bytes
 | Reply timeout | 50 ms | ~25× nominal round trip; absorbs Linux scheduling jitter |
 | Misses to set degraded | 3 consecutive | Tolerates transient jitter; detects a dead Pi within 3 s |
 | Successes to clear degraded | 5 consecutive | Hysteresis — prevents flag flapping on a marginal link |
+
+## CRC algorithm
+
+CRC-16/CCITT-FALSE
+Polynomial:      0x1021
+Initial value:   0xFFFF
+Input reflected: no
+Output reflected: no
+Final XOR:       none
