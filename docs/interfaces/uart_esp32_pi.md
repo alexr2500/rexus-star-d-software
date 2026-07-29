@@ -109,8 +109,9 @@ Multi-byte integers are **little-endian** throughout.
 | 24 | `IMU_gyro_x` | int16 | 2 B | 70 mdps/LSB (datasheet value) | ±2000 dps full scale |
 | 26 | `IMU_gyro_y` | int16 | 2 B | 70 mdps/LSB | ±2000 dps full scale |
 | 28 | `IMU_gyro_z` | int16 | 2 B | 70 mdps/LSB | ±2000 dps full scale |
+| 30 | `status_error_flag` | uint32 | 4B | - | Bitfield; see [error flag catalogue](../../esp32_flight_software/main/telemetry_flags.md) |
 
-Payload length: 30 bytes
+Payload length: 34 bytes
 
 ## Timing and error handling
 

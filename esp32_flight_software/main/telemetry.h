@@ -107,7 +107,7 @@ typedef struct __attribute__((packed)) {
 
     /* --- payload: fluidic */
     int16_t  slf3s_flow;
-    int16_t  ABP_pressure;
+    int16_t  abp_pressure;
 
     /* --- payload: system health --- */
     uint16_t voltage_mV;                 /* main PCB voltage, millivolts (unsigned: never negative) */

@@ -2,6 +2,8 @@
 #define ERROR_MANAGER_H
 
 #include <stdint.h>
+
+/*
                                                                         //ERROR FLAG BIT POSITION (defined as enum)
 typedef enum {
     ERROR_NONE = 0,             //no error                              1
@@ -28,6 +30,9 @@ typedef enum {
 const char* error_to_string(error_flag_t error);
 void raise_error(error_flag_t error);
 void remove_error(error_flag_t error);
-uint32_t get_error_flags(void);
+uint32_t get_error_flags(void); */
+
+static inline void err_set(uint32_t *f, uint8_t bit)   { *f |=  (1u << bit); }
+static inline void err_clear(uint32_t *f, uint8_t bit) { *f &= ~(1u << bit); }
 
 #endif
