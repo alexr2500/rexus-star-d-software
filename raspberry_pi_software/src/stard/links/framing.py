@@ -1,3 +1,5 @@
+from stard.links import protocol
+
 """Frame construction and parsing for the ESP32 <-> Pi UART link.
 
 See docs/interfaces/uart_esp32_pi.md for the frame format.
@@ -20,3 +22,18 @@ def crc16_ccitt(data: bytes) -> int:
                 crc = crc << 1
             crc &= 0xFFFF           # Python ints are unbounded - must truncate
     return crc
+
+
+def build_frame(msg_id: int, payload: bytes) -> bytes:
+    if len(payload) > protocol.PROTO_MAX_PAYLOAD:
+        raise ValueError(f"payload too long: {len(payload)}")
+
+    body = bytes([msg_id, len(payload)]) + payload
+    crc = crc16_ccitt(body)
+    return bytes([protocol.PROTO_SYNC0, protocol.PROTO_SYNC1]) + body + crc.to_bytes(2, "little")
+
+
+class FrameParser:
+    def feed(self, data: bytes) -> list[tuple[int, bytes]]:
+        """Feed received bytes. Returns a list of (msg_id, payload) for
+        each complete, valid frame found."""
