@@ -34,6 +34,58 @@ def build_frame(msg_id: int, payload: bytes) -> bytes:
 
 
 class FrameParser:
+    """Extracts complete, CRC-valid frames from an arbitrary byte stream."""
+
+    def __init__(self) -> None:
+        self._buf = bytearray()
+
     def feed(self, data: bytes) -> list[tuple[int, bytes]]:
-        """Feed received bytes. Returns a list of (msg_id, payload) for
-        each complete, valid frame found."""
+        self._buf.extend(data)          # append new bytes to what we already had
+        frames: list[tuple[int, bytes]] = []
+
+        while True:
+            # 1. Not enough bytes for even the smallest frame?
+            if len(self._buf) < protocol.PROTO_OVERHEAD_BYTES:
+                break
+
+            # 2. Find the sync pattern
+            sync = bytes([protocol.PROTO_SYNC0, protocol.PROTO_SYNC1])
+            pos = self._buf.find(sync)
+            if pos == -1:
+                # No sync anywhere. Keep only the last byte in case
+                # 0xAA is the start of a sync split across two feeds.
+                del self._buf[:-1]
+                break
+            if pos > 0:
+                del self._buf[:pos]     # discard garbage before the sync
+                continue                # re-check length from the top
+
+            # 3. Read the header
+            msg_id = self._buf[2]
+            length = self._buf[3]
+
+            # 4. Implausible length: cannot be a real frame.
+            #    Nudge forward one byte and resume hunting.
+            if length > protocol.PROTO_MAX_PAYLOAD:
+                del self._buf[:1]
+                continue
+
+            # 5. Is the whole frame here yet?
+            total = 4 + length + 2
+            if len(self._buf) < total:
+                break                   # legitimate frame, still arriving
+
+            # 6. Check the CRC over ID + length + payload
+            body = bytes(self._buf[2 : 4 + length])
+            received = int.from_bytes(self._buf[4 + length : total], "little")
+
+            # 7. Emit on success, resynchronise on failure
+            if crc16_ccitt(body) == received:
+                payload = bytes(self._buf[4 : 4 + length])
+                frames.append((msg_id, payload))
+                del self._buf[:total]
+            else:
+                del self._buf[:1]
+            continue
+
+        return frames

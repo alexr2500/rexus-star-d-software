@@ -6,5 +6,8 @@
     "--query-driver=**",
     "--compile-commands-dir=c:\\Users\\alexa\\Desktop\\REXUS\\SOFTWARE\\rexus_star_d_software\\build"
   ],
-  "python.analysis.extraPaths": ["raspberry_pi_software/src"]
+  "python.analysis.extraPaths": [
+    "raspberry_pi_software/src"
+  ],
+  "python-envs.defaultEnvManager": "ms-python.python:system"
 }

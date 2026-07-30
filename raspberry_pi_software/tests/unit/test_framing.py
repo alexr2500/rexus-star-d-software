@@ -1,6 +1,7 @@
 from stard.links.framing import crc16_ccitt
 from stard.links.framing import build_frame
 from stard.links import protocol
+from stard.links.framing import FrameParser
 import pytest
 
 
@@ -50,3 +51,54 @@ def test_build_frame_crc_is_little_endian():
     expected = crc16_ccitt(body)
     assert frame[-2] == expected & 0xFF          # low byte first
     assert frame[-1] == (expected >> 8) & 0xFF   # high byte second
+
+
+def test_parser_single_frame():
+    p = FrameParser()
+    frame = build_frame(protocol.MessageId.MSG_POLL, b"\x01\x02\x03")
+    assert p.feed(frame) == [(protocol.MessageId.MSG_POLL, b"\x01\x02\x03")]
+
+
+def test_parser_split_across_feeds():
+    p = FrameParser()
+    frame = build_frame(0x01, b"\x01\x02\x03\x04\x05\x06")
+    assert p.feed(frame[:3]) == []
+    assert p.feed(frame[3:7]) == []
+    assert p.feed(frame[7:]) == [(0x01, b"\x01\x02\x03\x04\x05\x06")]
+
+
+def test_parser_skips_leading_garbage():
+    p = FrameParser()
+    frame = build_frame(0x03, b"\xDE\xAD")
+    assert p.feed(b"\x11\x22\x33" + frame) == [(0x03, b"\xDE\xAD")]
+
+
+def test_parser_two_frames_in_one_feed():
+    p = FrameParser()
+    a = build_frame(0x01, b"\x01")
+    b = build_frame(0x03, b"\x02")
+    assert p.feed(a + b) == [(0x01, b"\x01"), (0x03, b"\x02")]
+
+
+def test_parser_rejects_corrupted_payload():
+    p = FrameParser()
+    frame = bytearray(build_frame(0x01, b"\x01\x02\x03"))
+    frame[5] ^= 0xFF                    # flip every bit of one payload byte
+    assert p.feed(bytes(frame)) == []
+
+
+def test_parser_survives_corrupted_length():
+    """A bad length byte must not hang the parser or swallow later frames."""
+    p = FrameParser()
+    bad = bytearray(build_frame(0x01, b"\x01\x02"))
+    bad[3] = 0xFF                       # claim a 255-byte payload
+    good = build_frame(0x03, b"\x09")
+    assert p.feed(bytes(bad) + good) == [(0x03, b"\x09")]
+
+
+def test_parser_sync_split_across_feeds():
+    """0xAA ends one chunk, 0x55 starts the next."""
+    p = FrameParser()
+    frame = build_frame(0x01, b"\x07")
+    assert p.feed(frame[:1]) == []      # just the 0xAA
+    assert p.feed(frame[1:]) == [(0x01, b"\x07")]
