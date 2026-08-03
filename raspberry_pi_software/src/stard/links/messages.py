@@ -73,15 +73,15 @@ def decode_status(payload: bytes) -> Status:
 @dataclass
 class Sensor:
     """Contents of a SENSOR_DATA message (ESP32 -> Pi)"""
-    ext_bme_temp_c: int
-    ext_bme_pressure_pa: int
-    ext_bme_humidity: int
-    int_bme_temp_c: int
-    int_bme_pressure_pa: int
-    int_bme_humidity: int
-    abp_pressure: int
-    slf3s_flow_ml: int
-    pt100_temp_c: int
+    ext_bme_temp_raw: int
+    ext_bme_pressure_raw: int
+    ext_bme_humidity_raw: int
+    int_bme_temp_raw: int
+    int_bme_pressure_raw: int
+    int_bme_humidity_raw: int
+    abp_pressure_raw: int
+    slf3s_flow_raw: int
+    pt100_temp_raw: int
     imu_accel_x: int
     imu_accel_y: int
     imu_accel_z: int
@@ -96,15 +96,15 @@ SENSOR_DATA_FORMAT = "<hHHhHHHhhhhhhhhI"
 
 def encode_sensor(se: Sensor) -> bytes:
     return struct.pack(SENSOR_DATA_FORMAT,
-        se.ext_bme_temp_c,
-        se.ext_bme_pressure_pa,
-        se.ext_bme_humidity,
-        se.int_bme_temp_c,
-        se.int_bme_pressure_pa,
-        se.int_bme_humidity,
-        se.abp_pressure,
-        se.slf3s_flow_ml,
-        se.pt100_temp_c,
+        se.ext_bme_temp_raw,
+        se.ext_bme_pressure_raw,
+        se.ext_bme_humidity_raw,
+        se.int_bme_temp_raw,
+        se.int_bme_pressure_raw,
+        se.int_bme_humidity_raw,
+        se.abp_pressure_raw,
+        se.slf3s_flow_raw,
+        se.pt100_temp_raw,
         se.imu_accel_x,
         se.imu_accel_y,
         se.imu_accel_z,
@@ -116,27 +116,27 @@ def encode_sensor(se: Sensor) -> bytes:
 def decode_sensor(payload:bytes) -> Sensor:
     if len(payload) != protocol.LEN_SENSOR_DATA:
         raise ValueError(f"SENSOR_DATA payload must be {protocol.LEN_SENSOR_DATA}, got {len(payload)}")
-    (ext_bme_temp_c, ext_bme_pressure_pa, ext_bme_humidity,
-    int_bme_temp_c, int_bme_pressure_pa, int_bme_humidity,
-    abp_pressure, slf3s_flow_ml, pt100_temp_c,
+    (ext_bme_temp_raw, ext_bme_pressure_raw, ext_bme_humidity_raw,
+    int_bme_temp_raw, int_bme_pressure_raw, int_bme_humidity_raw,
+    abp_pressure_raw, slf3s_flow_raw, pt100_temp_raw,
     imu_accel_x, imu_accel_y, imu_accel_z,
     imu_gyro_x, imu_gyro_y, imu_gyro_z,
     status_error_flag) = struct.unpack(SENSOR_DATA_FORMAT, payload)
     return Sensor(
-        ext_bme_temp_c=ext_bme_temp_c,
-        ext_bme_pressure_pa=ext_bme_pressure_pa,
-        ext_bme_humidity=ext_bme_humidity,
-        int_bme_temp_c=int_bme_temp_c,
-        int_bme_pressure_pa=int_bme_pressure_pa,
-        int_bme_humidity=int_bme_humidity,
-        abp_pressure=abp_pressure,
-        slf3s_flow_ml=slf3s_flow_ml,
-        pt100_temp_c=pt100_temp_c,
-        imu_accel_x=imu_accel_x,
-        imu_accel_y=imu_accel_y,
-        imu_accel_z=imu_accel_z,
-        imu_gyro_x=imu_gyro_x,
-        imu_gyro_y=imu_gyro_y,
-        imu_gyro_z=imu_gyro_z,
-        status_error_flag=status_error_flag
-    )
+            ext_bme_temp_raw=ext_bme_temp_raw,
+            ext_bme_pressure_raw=ext_bme_pressure_raw,
+            ext_bme_humidity_raw=ext_bme_humidity_raw,
+            int_bme_temp_raw=int_bme_temp_raw,
+            int_bme_pressure_raw=int_bme_pressure_raw,
+            int_bme_humidity_raw=int_bme_humidity_raw,
+            abp_pressure_raw=abp_pressure_raw,
+            slf3s_flow_raw=slf3s_flow_raw,
+            pt100_temp_raw=pt100_temp_raw,
+            imu_accel_x=imu_accel_x,
+            imu_accel_y=imu_accel_y,
+            imu_accel_z=imu_accel_z,
+            imu_gyro_x=imu_gyro_x,
+            imu_gyro_y=imu_gyro_y,
+            imu_gyro_z=imu_gyro_z,
+            status_error_flag=status_error_flag
+        )
