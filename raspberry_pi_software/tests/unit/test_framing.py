@@ -138,9 +138,9 @@ def test_status_roundtrip():
 def test_sensor_roundtrip_extremes():
     """Extreme values check every field's signedness."""
     s = Sensor(
-        ext_bme_temp_c=-4000, ext_bme_pressure_pa=50650, ext_bme_humidity=4500,
-        int_bme_temp_c=2345, int_bme_pressure_pa=50650, int_bme_humidity=5000,
-        abp_pressure=12000, slf3s_flow_ml=-500, pt100_temp_c=8500,
+        ext_bme_temp_raw=-4000, ext_bme_pressure_raw=50650, ext_bme_humidity_raw=4500,
+        int_bme_temp_raw=2345, int_bme_pressure_raw=50650, int_bme_humidity_raw=5000,
+        abp_pressure_raw=12000, slf3s_flow_raw=-500, pt100_temp_raw=8500,
         imu_accel_x=-32768, imu_accel_y=0, imu_accel_z=32767,
         imu_gyro_x=-1000, imu_gyro_y=0, imu_gyro_z=1000,
         status_error_flag=0xDEADBEEF,
