@@ -2,6 +2,13 @@ from stard.links.framing import crc16_ccitt
 from stard.links.framing import build_frame
 from stard.links import protocol
 from stard.links.framing import FrameParser
+import struct
+from stard.links.messages import (
+    Poll, Command, Status, Sensor,
+    encode_poll, decode_poll, encode_command, decode_command,
+    encode_status, decode_status, encode_sensor, decode_sensor,
+    POLL_FORMAT, COMMAND_FORMAT, STATUS_FORMAT, SENSOR_DATA_FORMAT,
+)
 import pytest
 
 
@@ -102,3 +109,57 @@ def test_parser_sync_split_across_feeds():
     frame = build_frame(0x01, b"\x07")
     assert p.feed(frame[:1]) == []      # just the 0xAA
     assert p.feed(frame[1:]) == [(0x01, b"\x07")]
+
+
+def test_formats_match_protocol_lengths():
+    assert struct.calcsize(POLL_FORMAT) == protocol.LEN_POLL
+    assert struct.calcsize(COMMAND_FORMAT) == protocol.LEN_COMMAND
+    assert struct.calcsize(STATUS_FORMAT) == protocol.LEN_STATUS
+    assert struct.calcsize(SENSOR_DATA_FORMAT) == protocol.LEN_SENSOR_DATA
+
+
+def test_poll_roundtrip_negative_time():
+    """Mission time must survive as negative — proves 'i' not 'I'."""
+    p = Poll(mode=protocol.SoftwareMode.MODE_NG, degraded=True, mission_time_ms=-45000)
+    assert decode_poll(encode_poll(p)) == p
+
+
+def test_command_roundtrip():
+    c = Command(command_flag=protocol.Command.CMD_WIPE, seq_number=7)
+    assert decode_command(encode_command(c)) == c
+
+
+def test_status_roundtrip():
+    s = Status(camera_status=protocol.CameraStatus.CAM_OK,
+               ssd_free_gb=97, command_seq_echo=7, command_result=2)
+    assert decode_status(encode_status(s)) == s
+
+
+def test_sensor_roundtrip_extremes():
+    """Extreme values check every field's signedness."""
+    s = Sensor(
+        ext_bme_temp_c=-4000, ext_bme_pressure_pa=50650, ext_bme_humidity=4500,
+        int_bme_temp_c=2345, int_bme_pressure_pa=50650, int_bme_humidity=5000,
+        abp_pressure=12000, slf3s_flow_ml=-500, pt100_temp_c=8500,
+        imu_accel_x=-32768, imu_accel_y=0, imu_accel_z=32767,
+        imu_gyro_x=-1000, imu_gyro_y=0, imu_gyro_z=1000,
+        status_error_flag=0xDEADBEEF,
+    )
+    assert decode_sensor(encode_sensor(s)) == s
+
+
+def test_decode_rejects_wrong_length():
+    with pytest.raises(ValueError):
+        decode_poll(b"\x00" * 5)
+
+
+def test_full_pipeline():
+    """encode -> frame -> parse -> decode returns the original."""
+    original = Poll(mode=4, degraded=False, mission_time_ms=123456)
+    frame = build_frame(protocol.MessageId.MSG_POLL, encode_poll(original))
+    parser = FrameParser()
+    results = parser.feed(frame)
+    assert len(results) == 1
+    msg_id, payload = results[0]
+    assert msg_id == protocol.MessageId.MSG_POLL
+    assert decode_poll(payload) == original

@@ -79,8 +79,6 @@ Multi-byte integers are **little-endian** throughout.
 
 ### 0x03 — STATUS (Pi → ESP32)
 
-//TODO: SSD storage
-
 | Offset | Field | Type | Size | Notes |
 |---|---|---|---|---|
 | 0 | Camera status | uint8 | 1 B | `camera_status_t` |
