@@ -21,13 +21,18 @@ class MessageId(IntEnum):
 
 # 3. Payload lengths
 
-LEN_POLL = 6
+LEN_POLL = 7
 LEN_COMMAND = 2
 LEN_STATUS = 4
 LEN_SENSOR_DATA = 34
 
 
 # 4. Enum catalogue
+
+class TimeRef(IntEnum):
+    TIME_UNSYNCED  = 0
+    TIME_COUNTDOWN = 1
+    TIME_MISSION   = 2
 
 class SoftwareMode(IntEnum):
     MODE_SU = 0

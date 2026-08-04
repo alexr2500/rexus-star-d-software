@@ -7,29 +7,36 @@ from stard.links import protocol
 @dataclass
 class Poll:
     """Contents of a POLL message (ESP32 -> Pi)."""
-    mode: int
+    mode: protocol.SoftwareMode
     degraded: bool
     mission_time_ms: int
+    time_ref: protocol.TimeRef
 
 
-POLL_FORMAT = "<BBi"
+POLL_FORMAT = "<BBiB"
 
 
 def encode_poll(p: Poll) -> bytes:
-    return struct.pack(POLL_FORMAT, p.mode, int(p.degraded), p.mission_time_ms)
+    return struct.pack(POLL_FORMAT, p.mode, int(p.degraded),
+                       p.mission_time_ms, p.time_ref)
 
 
 def decode_poll(payload: bytes) -> Poll:
     if len(payload) != protocol.LEN_POLL:
         raise ValueError(f"POLL payload must be {protocol.LEN_POLL} bytes, got {len(payload)}")
-    mode, degraded, mission_time = struct.unpack(POLL_FORMAT, payload)
-    return Poll(mode=mode, degraded=bool(degraded), mission_time_ms=mission_time)
+    mode, degraded, mission_time, time_ref = struct.unpack(POLL_FORMAT, payload)
+    return Poll(
+        mode=protocol.SoftwareMode(mode),
+        degraded=bool(degraded),
+        mission_time_ms=mission_time,
+        time_ref=protocol.TimeRef(time_ref),
+    )
 
 
 @dataclass
 class Command:
     """Contents of a COMMAND message (ESP32 -> Pi)."""
-    command_flag: int
+    command_flag: protocol.Command
     seq_number: int
 
 
@@ -44,30 +51,39 @@ def decode_command(payload: bytes) -> Command:
     if len(payload) != protocol.LEN_COMMAND:
         raise ValueError(f"COMMAND payload must be {protocol.LEN_COMMAND} bytes, got {len(payload)}")
     command_flag, seq_number = struct.unpack(COMMAND_FORMAT, payload)
-    return Command(command_flag=command_flag, seq_number=seq_number)
+    return Command(
+        command_flag=protocol.Command(command_flag),
+        seq_number=seq_number,
+    )
 
 
 @dataclass
 class Status:
     """Contents of a STATUS message (Pi -> ESP32)"""
-    camera_status: int
+    camera_status: protocol.CameraStatus
     ssd_free_gb: int
-    command_seq_echo: int
-    command_result: int
+    command_seq_echo: int                    # plain counter, not an enum
+    command_result: protocol.CommandResult
 
 
 STATUS_FORMAT = "<BBBB"
 
 
 def encode_status(s: Status) -> bytes:
-    return struct.pack(STATUS_FORMAT, s.camera_status, s.ssd_free_gb, s.command_seq_echo, s.command_result)
+    return struct.pack(STATUS_FORMAT, s.camera_status, s.ssd_free_gb,
+                       s.command_seq_echo, s.command_result)
 
 
 def decode_status(payload: bytes) -> Status:
     if len(payload) != protocol.LEN_STATUS:
         raise ValueError(f"STATUS payload must be {protocol.LEN_STATUS} bytes, got {len(payload)}")
     camera_status, ssd_free_gb, command_seq_echo, command_result = struct.unpack(STATUS_FORMAT, payload)
-    return Status(camera_status=protocol.CameraStatus(camera_status), ssd_free_gb=ssd_free_gb, command_seq_echo=command_seq_echo, command_result=command_result)
+    return Status(
+        camera_status=protocol.CameraStatus(camera_status),
+        ssd_free_gb=ssd_free_gb,
+        command_seq_echo=command_seq_echo,
+        command_result=protocol.CommandResult(command_result),
+    )
 
 
 @dataclass

@@ -120,7 +120,10 @@ def test_formats_match_protocol_lengths():
 
 def test_poll_roundtrip_negative_time():
     """Mission time must survive as negative — proves 'i' not 'I'."""
-    p = Poll(mode=protocol.SoftwareMode.MODE_NG, degraded=True, mission_time_ms=-45000)
+    p = Poll(mode=protocol.SoftwareMode.MODE_NG,
+             degraded=True,
+             mission_time_ms=-45000,
+             time_ref=protocol.TimeRef.TIME_COUNTDOWN)
     assert decode_poll(encode_poll(p)) == p
 
 
@@ -155,7 +158,10 @@ def test_decode_rejects_wrong_length():
 
 def test_full_pipeline():
     """encode -> frame -> parse -> decode returns the original."""
-    original = Poll(mode=4, degraded=False, mission_time_ms=123456)
+    original = Poll(mode=protocol.SoftwareMode.MODE_NE,
+                    degraded=False,
+                    mission_time_ms=123456,
+                    time_ref=protocol.TimeRef.TIME_MISSION)
     frame = build_frame(protocol.MessageId.MSG_POLL, encode_poll(original))
     parser = FrameParser()
     results = parser.feed(frame)
@@ -163,3 +169,19 @@ def test_full_pipeline():
     msg_id, payload = results[0]
     assert msg_id == protocol.MessageId.MSG_POLL
     assert decode_poll(payload) == original
+
+
+def test_decode_rejects_invalid_enum_value():
+    """An undefined mode value must be rejected, not silently accepted."""
+    payload = struct.pack(POLL_FORMAT, 99, 0, 0, 0)   # mode 99 doesn't exist
+    with pytest.raises(ValueError):
+        decode_poll(payload)
+
+
+def test_poll_roundtrip_unsynced():
+    """Pre-SODS: uptime with no mission reference."""
+    p = Poll(mode=protocol.SoftwareMode.MODE_SU,
+             degraded=False,
+             mission_time_ms=48213700,
+             time_ref=protocol.TimeRef.TIME_UNSYNCED)
+    assert decode_poll(encode_poll(p)) == p
