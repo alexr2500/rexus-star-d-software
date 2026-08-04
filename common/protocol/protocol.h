@@ -23,13 +23,19 @@ typedef enum {
 
 // 3. Payload lengths
 
-#define LEN_POLL 6
+#define LEN_POLL 7
 #define LEN_COMMAND 2
 #define LEN_STATUS 4
 #define LEN_SENSOR_DATA 34      //fixed length constants so that receiver checks if payload is corrupted
 
 
 // 4. Enum catalogue
+
+typedef enum {
+    TIME_UNSYNCED  = 0,
+    TIME_COUNTDOWN = 1,
+    TIME_MISSION   = 2
+} time_ref_t;
 
 typedef enum {
     MODE_SU = 0,

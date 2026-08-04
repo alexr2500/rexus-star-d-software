@@ -31,6 +31,7 @@ The cost is that Pi-originated information is bounded by the poll interval
 | Mode | SU / T / NG / NF / NE |
 | Degraded flag | Boolean |
 | Mission time | Milliseconds since LO; negative before LO |
+| Time reference | Tells the Pi if the ESP's clock is a legitimate mission timeline or unsynced |
 
 **`COMMAND`**
 | Field | Notes |
@@ -65,8 +66,9 @@ Multi-byte integers are **little-endian** throughout.
 | 0 | Mode | uint8 | 1 B | `software_mode_t` |
 | 1 | Degraded flag | uint8 | 1 B | 0 = nominal, 1 = degraded |
 | 2 | Mission time | int32 | 4 B | ms since LO, negative before LO |
+| 6 | Time reference | uint8 | 1 B | `time_ref_t` |
 
-*Payload length : 6 bytes*
+*Payload length : 7 bytes*
 
 ### 0x02 — COMMAND (ESP32 → Pi)
 
