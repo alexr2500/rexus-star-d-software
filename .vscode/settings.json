@@ -9,5 +9,5 @@
   "python.analysis.extraPaths": [
     "raspberry_pi_software/src"
   ],
-  "python-envs.defaultEnvManager": "ms-python.python:system"
+  "python-envs.defaultEnvManager": "ms-python.python:venv"
 }
