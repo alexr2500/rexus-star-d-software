@@ -27,6 +27,15 @@ BUFFER_COUNT = 6
 # stalled. At 41.85 fps this is ~0.5 s.
 STALL_THRESHOLD_FRAMES = 20
 
+# Video file rotation, in seconds. Short segments during NE bound the loss
+# from a corrupted write; long segments during countdown keep the file
+# count manageable through a multi-hour hold.
+ROTATION_S_NE = 30
+ROTATION_S_IDLE = 300
+
+FRAME_LIMIT_NE = round(ROTATION_S_NE * 41.85)      # 1256 (frame limit)
+FRAME_LIMIT_IDLE = ROTATION_S_IDLE * 4             # 1200
+
 
 @dataclass
 class Frame:
@@ -36,6 +45,7 @@ class Frame:
     time_ref: protocol.TimeRef
     sensor_timestamp_ns: int
     frame_count: int               # counter since start()
+    rotation_limit: int
 
 
 class CameraControl:
@@ -47,6 +57,7 @@ class CameraControl:
         time_ref_source: Callable[[], protocol.TimeRef]
     ) -> None:
         self._current_mode = protocol.SoftwareMode.MODE_SU
+        self._rotation_limit = FRAME_LIMIT_IDLE
         self._time_source = time_source
         self._time_ref_source = time_ref_source
 
@@ -100,7 +111,7 @@ class CameraControl:
                 self._frames_without_advance = 0
             self._last_sensor_timestamp_ns = sensor_ts
             self._frame_number += 1
-            return Frame(buffer=buf, mission_time_ms=self._time_source(), time_ref=self._time_ref_source(), sensor_timestamp_ns=sensor_ts, frame_count=self._frame_number)   # returns a constructed frame
+            return Frame(buffer=buf, mission_time_ms=self._time_source(), time_ref=self._time_ref_source(), sensor_timestamp_ns=sensor_ts, frame_count=self._frame_number, rotation_limit=self._rotation_limit)   # returns a constructed frame
         finally:
             request.release()   # releases the buffer count block
 
@@ -121,5 +132,7 @@ class CameraControl:
         self._current_mode = mode
         if mode == protocol.SoftwareMode.MODE_NE:
             self.set_frame_rate(FRAME_DURATION_NE_US)
+            self._rotation_limit = FRAME_LIMIT_NE
         else:
             self.set_frame_rate(FRAME_DURATION_IDLE_US)
+            self._rotation_limit = FRAME_LIMIT_IDLE
