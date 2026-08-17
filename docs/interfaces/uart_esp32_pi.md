@@ -67,8 +67,9 @@ Multi-byte integers are **little-endian** throughout.
 | 1 | Degraded flag | uint8 | 1 B | 0 = nominal, 1 = degraded |
 | 2 | Mission time | int32 | 4 B | ms since LO, negative before LO |
 | 6 | Time reference | uint8 | 1 B | `time_ref_t` |
+| 7 | SODS active | uint8 | 1 B | `sods_active` |
 
-*Payload length : 7 bytes*
+*Payload length : 8 bytes*
 
 ### 0x02 — COMMAND (ESP32 → Pi)
 

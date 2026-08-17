@@ -21,7 +21,7 @@ class MessageId(IntEnum):
 
 # 3. Payload lengths
 
-LEN_POLL = 7
+LEN_POLL = 8
 LEN_COMMAND = 2
 LEN_STATUS = 4
 LEN_SENSOR_DATA = 34

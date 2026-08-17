@@ -23,7 +23,7 @@ typedef enum {
 
 // 3. Payload lengths
 
-#define LEN_POLL 7
+#define LEN_POLL 8
 #define LEN_COMMAND 2
 #define LEN_STATUS 4
 #define LEN_SENSOR_DATA 34      //fixed length constants so that receiver checks if payload is corrupted

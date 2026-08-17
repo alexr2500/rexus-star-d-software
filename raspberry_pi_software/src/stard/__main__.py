@@ -1,63 +1,39 @@
-"""STAR-D Raspberry Pi flight software entry point."""
-
-import sys
-import time
-
-import serial
-
-from stard.links import messages, protocol
-from stard.links.uart_link import UartLink
-
-LOOP_PERIOD_S = 0.01          # 100 Hz — comfortably faster than 10 Hz sensor data
-SERIAL_PORT = "COM3"          # FIXME: read from config/mission_config.yaml / CHECK ELEC SCHEMATICS
-
-
-def make_status() -> messages.Status:
-    """Answer a POLL. Runs inside the 50 ms reply window, so must be fast."""
-    # TODO: real camera health and SSD free space.
-    # command_seq_echo and command_result are overwritten by the link.
-    return messages.Status(
-        camera_status=protocol.CameraStatus.CAM_UNKNOWN,
-        ssd_free_gb=0,
-        command_seq_echo=0,
-        command_result=protocol.CommandResult.RESULT_NONE,
-    )
-
-
-def log_sensors(sensor: messages.Sensor) -> None:
-    """Receive one SENSOR_DATA message at 10 Hz."""
-    # TODO: hand to the CSV writer.
-    # Printing every message floods the terminal — throttle it.
-    ...
-
-
-def handle_command(cmd: messages.Command) -> protocol.CommandResult:
-    if cmd.command_flag == protocol.Command.CMD_WIPE:
-        # TODO: delete oldest files first; must not block the 50 ms window
-        return protocol.CommandResult.RESULT_OK
-    if cmd.command_flag == protocol.Command.CMD_TEST:
-        # TODO: verify camera responds and SSD is writable
-        return protocol.CommandResult.RESULT_OK
-    return protocol.CommandResult.RESULT_FAILED
-
+from stard.links import protocol
+from stard.camera import camera_control, video_writer
 
 def main() -> None:
-    link = UartLink(SERIAL_PORT, make_status, log_sensors, handle_command)  # Useful only if port is present
-    print(f"Link open on {SERIAL_PORT}")                                    # Do not use if bench testing with no ESP
+    # --- SU: local startup, independent of the link ---------------
+    def __init__(self) -> None:
+        self._pi_init_complete = False  # remains false even if ESP init is complete
 
-    next_tick = time.monotonic()
-    try:
-        while True:
-            link.service()
+     
+    def effective_mode(self) -> protocol.SoftwareMode:
+        """SU until local init is done, regardless of what the ESP32 reports."""
+        if not self._pi_init_complete:
+            return protocol.SoftwareMode.MODE_SU
+        return self._link.mode()
+    #   create output directories
+    #   construct camera (may raise if absent -> set fault, continue)
 
-            # TODO later: camera.service(), storage.service()
+    cam = 
 
-            next_tick += LOOP_PERIOD_S
-            time.sleep(max(0.0, next_tick - time.monotonic()))
-    except KeyboardInterrupt:
-        print("\nShutting down.")
-        # TODO: stop recording, flush and close files
+    #   construct writer, loggers
+    #   self-test: SSD writable? free space adequate?
+
+    if (protocol.SoftwareMode == protocol.SoftwareMode.MODE_T):
 
 
-if __name__ == "__main__":
-    main()
+    # --- start the threads ----------------------------------------
+    #   writer.start()
+    #   camera.start()
+    #   capture thread with the shared stop_event
+
+    # --- main loop -------------------------------------------------
+    #   link.service()                    <- protocol first
+    #   camera.set_mode(link.mode())      <- react to mode changes
+    #   periodic: system state CSV at 10 Hz
+    #   periodic: telemetry CSV at 1 Hz
+    #   sleep to next tick
+
+    # --- shutdown --------------------------------------------------
+    #   stop capture, camera, writer, loggers

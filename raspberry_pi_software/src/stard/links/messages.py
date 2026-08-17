@@ -11,25 +11,27 @@ class Poll:
     degraded: bool
     mission_time_ms: int
     time_ref: protocol.TimeRef
+    sods_active: bool
 
 
-POLL_FORMAT = "<BBiB"
+POLL_FORMAT = "<BBiBB"
 
 
 def encode_poll(p: Poll) -> bytes:
     return struct.pack(POLL_FORMAT, p.mode, int(p.degraded),
-                       p.mission_time_ms, p.time_ref)
+                       p.mission_time_ms, p.time_ref, int(p.sods_active))
 
 
 def decode_poll(payload: bytes) -> Poll:
     if len(payload) != protocol.LEN_POLL:
         raise ValueError(f"POLL payload must be {protocol.LEN_POLL} bytes, got {len(payload)}")
-    mode, degraded, mission_time, time_ref = struct.unpack(POLL_FORMAT, payload)
+    mode, degraded, mission_time, time_ref, sods_active = struct.unpack(POLL_FORMAT, payload)
     return Poll(
         mode=protocol.SoftwareMode(mode),
         degraded=bool(degraded),
         mission_time_ms=mission_time,
         time_ref=protocol.TimeRef(time_ref),
+        sods_active=bool(sods_active)
     )
 
 

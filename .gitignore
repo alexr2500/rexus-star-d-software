@@ -20,6 +20,8 @@ __pycache__/
 venv/
 .venv/
 *.egg-info/
+.coverage
+htmlcov/
 
 # Editors and OS
 .DS_Store
