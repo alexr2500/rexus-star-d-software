@@ -2,6 +2,8 @@
 
 Raw YUV420 capture, no encoding possible"""
 
+import threading
+import time
 from dataclasses import dataclass
 from typing import Optional
 from typing import Callable
@@ -74,6 +76,7 @@ class CameraControl:
         self._frame_number = 0
         self._last_sensor_timestamp_ns = 0
         self._frames_without_advance = 0
+        self._capture_errors = 0
 
 
     def start(self) -> None:
@@ -136,3 +139,28 @@ class CameraControl:
         else:
             self.set_frame_rate(FRAME_DURATION_IDLE_US)
             self._rotation_limit = FRAME_LIMIT_IDLE
+
+
+    def run_capture_loop(self, writer, stop_event: threading.Event) -> None:
+        """Capture frames continuously and hand them to the writer.
+
+        Runs on its own thread: capture() blocks for up to one frame
+        interval (250 ms at 4 fps), which would stall the UART link if it
+        ran in the main loop.
+
+        No sleep or pacing here — capture() blocks until the sensor
+        produces a frame, so the loop runs at exactly the configured
+        frame rate.
+        """
+        while not stop_event.is_set():
+            try:
+                frame = self.capture()
+            except Exception:
+                self._capture_errors += 1
+                continue
+
+            if frame is None:       # not running yet
+                time.sleep(0.05)
+                continue
+
+            writer.submit(frame)
