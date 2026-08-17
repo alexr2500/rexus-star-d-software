@@ -47,6 +47,8 @@ class VideoWriter:
         self._file: IO[bytes] | None = None
         self._frames_in_file = 0
         self._frames_written = 0
+        self._write_failed = False
+        self._write_errors = 0
 
 
     def submit(self, frame: Frame) -> bool:
@@ -69,6 +71,16 @@ class VideoWriter:
 
     def frames_written(self) -> int:
         return self._frames_written
+
+
+    def shutdown_timed_out(self) -> bool:
+        """True if the writer thread did not finish within the join timeout."""
+        return self._shutdown_timed_out
+
+
+    def write_failed(self) -> bool:
+            """True if any write, rollover or fsync has failed."""
+            return self._write_failed
 
 
     def start(self) -> None:
@@ -104,16 +116,15 @@ class VideoWriter:
                 if item is _SENTINEL:
                     break
 
-                self._write_frame(item)
+                try:
+                    self._write_frame(item)
+                    self._write_failed = False  # write fail doesn't latch since flipped if write is successful
+                except Exception:
+                    self._write_failed = True
+                    self._write_errors += 1
         finally:
             self._close_file()
 
-
-    def shutdown_timed_out(self) -> bool:
-        """True if the writer thread did not finish within the join timeout."""
-        return self._shutdown_timed_out
-
-    # TODO: add this flag as `VIDEO_SHUTDOWN_INCOMPLETE` in the status/error flags
 
     def _write_frame(self, frame: Frame) -> None:
         if self._file is None or self._frames_in_file >= frame.rotation_limit:
@@ -126,7 +137,6 @@ class VideoWriter:
         self._frames_in_file += 1
         self._frames_written += 1
 
-    # TODO: write a try/except for CAM_WRITE_FAIL
 
     def _filename(self, frame: Frame) -> str:
         """Encode the time reference so a post-flight reader can tell a

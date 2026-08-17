@@ -30,4 +30,5 @@ This catalogue shows what each bit of the `status_error_flag` *(uint32)* variabl
 | 17 | WATCHDOG_RESET | Yes | Last reset was watchdog-initiated; set at boot |
 | 18 | CSV_WRITE_FAULT | Yes | Pi reported a metadata write failure |
 | 19 | CONFIG_LOAD_FAULT | Yes | Configuration could not be read at startup; running on compiled defaults |
-| 20–31 | *Reserved* | — | Available for future use; transmitted as zero |
+| 20 | VIDEO_SHUTDOWN_INCOMPLETE | No | Video recording did not have time to shutdown during join period |
+| 21–31 | *Reserved* | — | Available for future use; transmitted as zero |

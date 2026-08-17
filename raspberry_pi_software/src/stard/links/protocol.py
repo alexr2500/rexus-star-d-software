@@ -61,27 +61,28 @@ class CommandResult(IntEnum):
 
 # 5. Sentinel values
 
-ERR_BIT_PT100               = 0
-ERR_BIT_INT_BME             = 1
-ERR_BIT_EXT_BME             = 2
-ERR_BIT_SLF3S               = 3
-ERR_BIT_ABP                 = 4
-ERR_BIT_LSM6DSM             = 5
-ERR_BIT_PI_DEGRADED         = 6
-ERR_BIT_CAM_STATUS          = 7
-ERR_BIT_LOW_SSD             = 8
-ERR_BIT_LOW_SSD_FOR_FLIGHT  = 9
-ERR_BIT_THERMAL_FAULT       = 10
-ERR_BIT_HEATER_FAULT        = 11
-ERR_BIT_FLUIDIC_FAULT       = 12
-ERR_BIT_TCU_UART_LINK       = 13
-ERR_BIT_RXSM_LINK           = 14
-ERR_BIT_UNEXPECTED_SIGNAL   = 15
-ERR_BIT_MODE_TRANSITION     = 16
-ERR_BIT_WATCHDOG_RESET      = 17
-ERR_BIT_CSV_WRITE           = 18
-ERR_BIT_CONFIG_LOAD         = 19
-# Bits 20-31 reserved, = 0
+ERR_BIT_PT100                       = 0
+ERR_BIT_INT_BME                     = 1
+ERR_BIT_EXT_BME                     = 2
+ERR_BIT_SLF3S                       = 3
+ERR_BIT_ABP                         = 4
+ERR_BIT_LSM6DSM                     = 5
+ERR_BIT_PI_DEGRADED                 = 6
+ERR_BIT_CAM_STATUS                  = 7
+ERR_BIT_LOW_SSD                     = 8
+ERR_BIT_LOW_SSD_FOR_FLIGHT          = 9
+ERR_BIT_THERMAL_FAULT               = 10
+ERR_BIT_HEATER_FAULT                = 11
+ERR_BIT_FLUIDIC_FAULT               = 12
+ERR_BIT_TCU_UART_LINK               = 13
+ERR_BIT_RXSM_LINK                   = 14
+ERR_BIT_UNEXPECTED_SIGNAL           = 15
+ERR_BIT_MODE_TRANSITION             = 16
+ERR_BIT_WATCHDOG_RESET              = 17
+ERR_BIT_CSV_WRITE                   = 18
+ERR_BIT_CONFIG_LOAD                 = 19
+ERR_BIT_VIDEO_SHUTDOWN_INCOMPLETE   = 20
+# Bits 21-31 reserved, = 0
 
 
 # 6. Sensor scale factors (multiply raw by scale)

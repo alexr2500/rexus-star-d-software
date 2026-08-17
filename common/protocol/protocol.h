@@ -72,27 +72,28 @@ typedef enum {
 
 // See telemetry_flags.md for descriptions and latching behaviour
 
-#define ERR_BIT_PT100              0
-#define ERR_BIT_INT_BME            1
-#define ERR_BIT_EXT_BME            2
-#define ERR_BIT_SLF3S              3
-#define ERR_BIT_ABP                4
-#define ERR_BIT_LSM6DSM            5
-#define ERR_BIT_PI_DEGRADED        6
-#define ERR_BIT_CAM_STATUS         7
-#define ERR_BIT_LOW_SSD            8
-#define ERR_BIT_LOW_SSD_FOR_FLIGHT 9
-#define ERR_BIT_THERMAL_FAULT      10
-#define ERR_BIT_HEATER_FAULT       11
-#define ERR_BIT_FLUIDIC_FAULT      12
-#define ERR_BIT_TCU_UART_LINK      13
-#define ERR_BIT_RXSM_LINK          14
-#define ERR_BIT_UNEXPECTED_SIGNAL  15
-#define ERR_BIT_MODE_TRANSITION    16
-#define ERR_BIT_WATCHDOG_RESET     17
-#define ERR_BIT_CSV_WRITE          18
-#define ERR_BIT_CONFIG_LOAD        19
-// Bits 20-31 reserved, transmitted as zero
+#define ERR_BIT_PT100                       0
+#define ERR_BIT_INT_BME                     1
+#define ERR_BIT_EXT_BME                     2
+#define ERR_BIT_SLF3S                       3
+#define ERR_BIT_ABP                         4
+#define ERR_BIT_LSM6DSM                     5
+#define ERR_BIT_PI_DEGRADED                 6
+#define ERR_BIT_CAM_STATUS                  7
+#define ERR_BIT_LOW_SSD                     8
+#define ERR_BIT_LOW_SSD_FOR_FLIGHT          9
+#define ERR_BIT_THERMAL_FAULT               10
+#define ERR_BIT_HEATER_FAULT                11
+#define ERR_BIT_FLUIDIC_FAULT               12
+#define ERR_BIT_TCU_UART_LINK               13
+#define ERR_BIT_RXSM_LINK                   14
+#define ERR_BIT_UNEXPECTED_SIGNAL           15
+#define ERR_BIT_MODE_TRANSITION             16
+#define ERR_BIT_WATCHDOG_RESET              17
+#define ERR_BIT_CSV_WRITE                   18
+#define ERR_BIT_CONFIG_LOAD                 19
+#define ERR_BIT_VIDEO_SHUTDOWN_INCOMPLETE   20
+// Bits 21-31 reserved, transmitted as zero
 
 
 // 6. Sensor scale factors (multiply raw by scale)
