@@ -49,6 +49,8 @@ class VideoWriter:
         self._frames_written = 0
         self._write_failed = False
         self._write_errors = 0
+        self._file_time_ref: protocol.TimeRef | None = None
+        self._file_rotation_limit: int | None = None
 
 
     def submit(self, frame: Frame) -> bool:
@@ -127,7 +129,10 @@ class VideoWriter:
 
 
     def _write_frame(self, frame: Frame) -> None:
-        if self._file is None or self._frames_in_file >= frame.rotation_limit:
+        if (self._file is None
+                or self._frames_in_file >= frame.rotation_limit
+                or frame.time_ref != self._file_time_ref
+                or frame.rotation_limit != self._file_rotation_limit):
             self._open_new_file(frame)
 
         if self._file is None:
@@ -154,13 +159,18 @@ class VideoWriter:
     def _open_new_file(self, frame: Frame) -> None:
         """Close the current file and start a new one.
 
-        A mode change mid-file causes an immediate rollover, because the
-        new frame carries a smaller rotation_limit. That is intentional:
-        it gives a clean file boundary at the NE transition.
+        A change in time_ref or rotation_limit forces an immediate
+        rollover, even though row-count thresholds alone would not always
+        trigger one (e.g. entering NE grows the limit from 1200 to 1256,
+        so frame count never crosses it). Without this, a single file
+        would span countdown, LO and the start of the experiment. This
+        gives a clean file boundary at every mode/time-ref transition.
         """
         self._close_file()
         self._file = open(self._filename(frame), "wb")
         self._frames_in_file = 0
+        self._file_time_ref = frame.time_ref
+        self._file_rotation_limit = frame.rotation_limit
         self._write_sidecar(frame)
 
 

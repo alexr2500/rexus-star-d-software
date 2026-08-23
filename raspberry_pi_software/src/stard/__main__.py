@@ -21,11 +21,12 @@ LOOP_PERIOD_S = 0.01          # 100 Hz
 
 
 class SoftwarePiComputer:
-    def __init__(self) -> None:
+    def __init__(self, port=SERIAL_PORT, data_root=DATA_ROOT,
+                 picamera_factory=None) -> None:
         self._pi_init_complete = False
         self._stop_event = threading.Event()
-        self._storage = StorageManager(DATA_ROOT)
-        self._link = UartLink(SERIAL_PORT, self.make_status, self.log_sensors, self.handle_command)
+        self._storage = StorageManager(data_root)
+        self._link = UartLink(port, self.make_status, self.log_sensors, self.handle_command)
         self._camera_fault = False
         self._camera: CameraControl | None = None
 
@@ -34,13 +35,14 @@ class SoftwarePiComputer:
 
         try:
             self._camera = CameraControl(self._link.mission_time_ms,
-                                         self._link.time_ref)
+                                         self._link.time_ref,
+                                         picamera_factory)
         except Exception:
             self._camera_fault = True
-        
-        self._writer = VideoWriter(os.path.join(DATA_ROOT, "video"))
 
-        csv_dir = os.path.join(DATA_ROOT, "csv")
+        self._writer = VideoWriter(os.path.join(data_root, "video"))
+
+        csv_dir = os.path.join(data_root, "csv")
         t, tr = self._link.mission_time_ms, self._link.time_ref
         self._sensor_log = csv_manager.SensorCsvLogger(csv_dir, t, tr)
         self._state_log = csv_manager.SystemStateCsvLogger(csv_dir, t, tr)
@@ -130,15 +132,19 @@ class SoftwarePiComputer:
         self._capture_thread.start()
 
 
-    def run(self) -> None:
+    def run(self, until: float | None = None) -> None:
         """Main loop. Services the link and drives the periodic logging.
 
         Link first: CSV rows written later in the same iteration then
         carry values from this cycle rather than the previous one.
-        """
-        next_tick = time.monotonic()
 
-        while True:
+        When `until` is given, the loop returns after that many seconds
+        have elapsed; when it is None the loop runs forever, as before.
+        """
+        start = time.monotonic()
+        next_tick = start
+
+        while until is None or (time.monotonic() - start) < until:
             self._link.service()
 
             if self._camera is not None:

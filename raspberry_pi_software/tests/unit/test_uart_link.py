@@ -59,10 +59,12 @@ def make_link():
 def poll_frame(mission_time_ms: int,
                mode: protocol.SoftwareMode = protocol.SoftwareMode.MODE_NG,
                time_ref: protocol.TimeRef = protocol.TimeRef.TIME_MISSION,
-               degraded: bool = False) -> bytes:
+               degraded: bool = False,
+               sods_active: bool = False) -> bytes:
     payload = messages.encode_poll(messages.Poll(
         mode=mode, degraded=degraded,
-        mission_time_ms=mission_time_ms, time_ref=time_ref))
+        mission_time_ms=mission_time_ms, time_ref=time_ref,
+        sods_active=sods_active))
     return build_frame(protocol.MessageId.MSG_POLL, payload)
 
 
@@ -266,7 +268,7 @@ def test_invalid_enum_value_is_rejected():
     """Mode 99 is undefined: reject rather than propagate it."""
     link, ser, _, _ = make_link()
     import struct
-    bad = struct.pack(messages.POLL_FORMAT, 99, 0, 0, 0)
+    bad = struct.pack(messages.POLL_FORMAT, 99, 0, 0, 0, 0)
     ser.feed(build_frame(protocol.MessageId.MSG_POLL, bad))
     link.service()
 

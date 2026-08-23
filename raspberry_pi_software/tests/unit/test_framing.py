@@ -123,7 +123,8 @@ def test_poll_roundtrip_negative_time():
     p = Poll(mode=protocol.SoftwareMode.MODE_NG,
              degraded=True,
              mission_time_ms=-45000,
-             time_ref=protocol.TimeRef.TIME_COUNTDOWN)
+             time_ref=protocol.TimeRef.TIME_COUNTDOWN,
+             sods_active=True)
     assert decode_poll(encode_poll(p)) == p
 
 
@@ -161,7 +162,8 @@ def test_full_pipeline():
     original = Poll(mode=protocol.SoftwareMode.MODE_NE,
                     degraded=False,
                     mission_time_ms=123456,
-                    time_ref=protocol.TimeRef.TIME_MISSION)
+                    time_ref=protocol.TimeRef.TIME_MISSION,
+                    sods_active=True)
     frame = build_frame(protocol.MessageId.MSG_POLL, encode_poll(original))
     parser = FrameParser()
     results = parser.feed(frame)
@@ -173,7 +175,7 @@ def test_full_pipeline():
 
 def test_decode_rejects_invalid_enum_value():
     """An undefined mode value must be rejected, not silently accepted."""
-    payload = struct.pack(POLL_FORMAT, 99, 0, 0, 0)   # mode 99 doesn't exist
+    payload = struct.pack(POLL_FORMAT, 99, 0, 0, 0, 0)   # mode 99 doesn't exist
     with pytest.raises(ValueError):
         decode_poll(payload)
 
@@ -183,5 +185,6 @@ def test_poll_roundtrip_unsynced():
     p = Poll(mode=protocol.SoftwareMode.MODE_SU,
              degraded=False,
              mission_time_ms=48213700,
-             time_ref=protocol.TimeRef.TIME_UNSYNCED)
+             time_ref=protocol.TimeRef.TIME_UNSYNCED,
+             sods_active=False)
     assert decode_poll(encode_poll(p)) == p

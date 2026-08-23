@@ -8,7 +8,10 @@ from dataclasses import dataclass
 from typing import Optional
 from typing import Callable
 
-from picamera2 import Picamera2
+try:
+    from picamera2 import Picamera2
+except ImportError:
+    Picamera2 = None
 
 from stard.links import protocol
 
@@ -56,14 +59,18 @@ class CameraControl:
     def __init__(
         self,
         time_source: Callable[[], int],                     # takes no argument and returns an int
-        time_ref_source: Callable[[], protocol.TimeRef]
+        time_ref_source: Callable[[], protocol.TimeRef],
+        picamera_factory=None,
     ) -> None:
         self._current_mode = protocol.SoftwareMode.MODE_SU
         self._rotation_limit = FRAME_LIMIT_IDLE
         self._time_source = time_source
         self._time_ref_source = time_ref_source
 
-        self._picam = Picamera2()           # accesses the Pi camera constructor
+        factory = picamera_factory or Picamera2
+        if factory is None:
+            raise RuntimeError("no picamera2 available and no picamera_factory given")
+        self._picam = factory()             # accesses the Pi camera constructor
         self._config = self._picam.create_video_configuration(
             main={"size": SENSOR_SIZE, "format": PIXEL_FORMAT},
             controls={"FrameDurationLimits": (FRAME_DURATION_IDLE_US,

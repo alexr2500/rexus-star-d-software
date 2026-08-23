@@ -21,6 +21,7 @@ LOW_SSD_FOR_FLIGHT_GB = 100
 class StorageManager:
 
     def __init__(self, root: str) -> None:
+        self._root = root
         self._free_bytes = 0
         self._read_failed = False
         self.refresh()
@@ -42,13 +43,15 @@ class StorageManager:
 
 
     def free_gb(self) -> int:
-        """Cached free space in whole GB, rounded down.
+        """Cached free space in whole GB, rounded down, clamped to 254.
 
-        Not clamped to 254: 0xFF is the ESP32's sentinel for an
-        unreachable Pi, and only the ESP32 can set it. The ranges do not
-        collide with a 128 GB SSD.
+        This feeds a <B field in STATUS (messages.encode_status), so it
+        must fit in a byte. 255 (0xFF) is reserved as the ESP32's sentinel
+        for an unreachable Pi; only the ESP32 may set it, so the Pi caps
+        at 254. Unreachable with the 128 GB flight SSD - only triggers on
+        a larger bench disk.
         """
-        return self._free_bytes // BYTES_PER_GB
+        return min(254, self._free_bytes // BYTES_PER_GB)
 
 
     def self_test(self) -> bool:
