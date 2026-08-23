@@ -128,6 +128,11 @@ class CameraControl:
             return protocol.CameraStatus.CAM_OK
 
 
+    def is_running(self) -> bool:
+            """True once start() has been called"""
+            return self._running
+
+
     def set_mode(self, mode: protocol.SoftwareMode) -> None:
         """Full frame rate during the experiment, idle rate otherwise."""
         if self._current_mode == mode:
