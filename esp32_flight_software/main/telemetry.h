@@ -3,8 +3,7 @@
 
 #include <stdint.h>
 #include "mode_manager.h"    /* software_mode_t — owned there, not modified here */
-#include "camera_manager.h"  /* camera_status_t — TODO: adjust path to your actual camera module */
-#include "storage_manager.h" /* ssd_status_t — TODO: adjust path to your actual storage module */
+#include "protocol.h"
 
 /* =====================================================================
  * STAR-D TELEMETRY PACKET DEFINITION
@@ -51,32 +50,6 @@
 #define TLM_HEADER_LEN 6u
 
 /* ---------------------------------------------------------------------
- * Status types (camera_status_t, ssd_status_t) are NOT defined here.
- * They live in the modules that actually produce them — camera_manager.h
- * and storage_manager.h — same pattern as software_mode_t in
- * mode_manager.h. telemetry.h only needs the type names (for the
- * setter prototypes below); it never owns their meaning. This keeps
- * telemetry.h a pure wire-format definition, not a dumping ground for
- * every subsystem's enums as the project grows.
- *
- * Expected shape, to define in camera_manager.h:
- *   typedef enum {
- *       CAM_STATUS_NOT_DETECTED = 0,  // not enumerated by libcamera at boot/test
- *       CAM_STATUS_OK            = 1,  // SensorTimestamp advancing + last write confirmed
- *       CAM_STATUS_STALLED       = 2,  // detected, but SensorTimestamp not advancing
- *       CAM_STATUS_WRITE_FAIL    = 3   // frames captured, but storage write not confirmed
- *   } camera_status_t;
- *
- * Expected shape, to define in storage_manager.h:
- *   typedef enum {
- *       SSD_STATUS_OK        = 0,
- *       SSD_STATUS_LOW_SPACE = 1,
- *       SSD_STATUS_FULL      = 2,
- *       SSD_STATUS_ERROR     = 3
- *   } ssd_status_t;
- * ------------------------------------------------------------------- */
-
-/* ---------------------------------------------------------------------
  * The packet itself. Packed (no padding) so the struct's byte layout
  * IS the wire layout. Fields are listed in the exact order they're
  * transmitted, top to bottom — read this struct top to bottom and
@@ -112,7 +85,7 @@ typedef struct __attribute__((packed)) {
     /* --- payload: system health --- */
     uint16_t voltage_mV;                 /* main PCB voltage, millivolts (unsigned: never negative) */
     uint8_t  stepper_motor_activation;   /* 0/1, latched once confirmed after SOE */
-    uint8_t  ssd_status;                 /* ssd_status_t */
+    uint8_t  ssd_free_gb;                 /* ssd_free_gb    0xFF = unknown */
     uint8_t  camera_status;              /* camera_status_t */
     uint32_t status_error_flag;          /* bitmask, see error_manager.h enum. Extra bytes serve as status flags for indications */
 

@@ -69,6 +69,8 @@ typedef enum {
 // 5. Sentinel values
 
 #define SSD_VALUE_UNKNOWN 0xFF
+#define LOW_SSD_GB            20
+#define LOW_SSD_FOR_FLIGHT_GB 100
 
 // See telemetry_flags.md for descriptions and latching behaviour
 
