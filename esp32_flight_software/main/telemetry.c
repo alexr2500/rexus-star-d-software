@@ -1,4 +1,5 @@
 #include "telemetry.h"
+#include "crc16.h"
 #include <string.h>
 #include "error_manager.h"
 

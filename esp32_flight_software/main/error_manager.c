@@ -23,8 +23,7 @@ void error_manager_init(void)
 
 void error_raise(uint8_t bit)
 {
-    /* Guard the index, then one atomic_fetch_or.
-       No latch check — raising is always permitted. */
+    
 }
 
 
