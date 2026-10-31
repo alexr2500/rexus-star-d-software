@@ -120,7 +120,7 @@ void error_update_pi_status(camera_status_t cam,
     /* Bit 9 - not enough room for a full flight. A go/no-go indication
        that only means anything before lift-off; afterwards the question
        is settled and the bit clears. */
-    if (pre_lo && ssd_free_gb < LOW_SSD_FOR_FLIGHT_GB) {
+    if (pre_LO && ssd_free_gb < LOW_SSD_FOR_FLIGHT_GB) {
         error_raise(ERR_BIT_LOW_SSD_FOR_FLIGHT);
     } else {
         error_clear(ERR_BIT_LOW_SSD_FOR_FLIGHT);

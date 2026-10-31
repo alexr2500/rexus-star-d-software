@@ -4,7 +4,7 @@
 #include "error_manager.h"
 
 static TelemetryPacket packet;          //encapsulation: telemetry packet is only handled by this file
-static uint16_t sequence_count = 0;
+static uint16_t sequence_count = 0;     //sequence count is only set by this file, and is incremented every time a packet is sent. No number errors from external modules
 
 void telemetry_init(void) {
     sequence_count = 0;
@@ -12,21 +12,14 @@ void telemetry_init(void) {
 }
 
 static void telemetry_update() {
-    packet.header.packet_id = 0x01;         //CCSDS_Formatting
-    packet.header.sequence_order++;
-    packet.header.packet_content_length = sizeof(TelemetryPacket) - sizeof(CCSDS_Formatting);
-    packet.packet_size = sizeof(TelemetryPacket);
+    packet.sync1 = TLM_SYNC1;        //CCSDS_Formatting
+    packet.sync2 = TLM_SYNC2;
+    packet.msg_id = TLM_MSG_ID_TELEMETRY;
+    packet.seq_count = sequence_count++;
+    packet.payload_length = TLM_PAYLOAD_LENGTH;
 
-    packet.voltage = read_voltage();        //packet contents / read data
-    packet.board_temp = read_board_temp();
-    packet.SSD_status = read_SSD_status();
-    packet.camera_status = read_camera_status();
-    packet.pv_temp = read_pv_temp();
-    packet.general_temp = read_general_temp();
-    packet.timestamp = get_timestamp_ms();
-    strcpy(packet.message, "");                 //TODO: see how to link this to a given status/mode/error/message
-    packet.error_flag = get_error_flags();     //returns the error flag so that we know what errors have occured if any
-    size_t len = sizeof(TelemetryPacket);
+    packet.timestamp_ms = 
+    packet.mode = 
     
     uint8_t* data = (uint8_t*)&packet;
 
@@ -55,4 +48,19 @@ uint16_t checksum16_ccitt(const uint8_t* data, size_t len) {
         }
     }
     return crc;
+}
+
+void telemetry_set_mode(software_mode_t mode)
+{
+    packet.mode = (uint8_t)mode;
+}
+
+void telemetry_set_camera_status(camera_status_t status)
+{
+    packet.camera_status = (uint8_t)status;
+}
+
+void telemetry_set_ssd_free_gb(uint8_t free_gb)
+{
+    packet.ssd_free_gb = free_gb;
 }

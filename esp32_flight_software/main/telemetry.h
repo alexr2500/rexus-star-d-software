@@ -113,6 +113,6 @@ void telemetry_task(void);
  * that actually owns that status's meaning. */
 void telemetry_set_mode(software_mode_t mode);
 void telemetry_set_camera_status(camera_status_t status);
-void telemetry_set_ssd_status(ssd_status_t status);
+void telemetry_set_ssd_free_gb(uint8_t free_gb);
 
 #endif
