@@ -12,7 +12,7 @@ from stard.camera.camera_control import CameraControl
 from stard.camera.video_writer import VideoWriter
 from stard.datalog import csv_manager
 from stard.links import messages, protocol
-from stard.links.uart_link import UartLink
+from stard.links.spi_link import UartLink
 from stard.storage.storage_manager import StorageManager, LOW_SSD_FOR_FLIGHT_GB
 
 SERIAL_PORT = "/dev/ttyAMA0"

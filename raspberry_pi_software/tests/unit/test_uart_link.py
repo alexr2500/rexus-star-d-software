@@ -8,7 +8,7 @@ import pytest
 
 from stard.links import messages, protocol
 from stard.links.framing import FrameParser, build_frame
-from stard.links.uart_link import UartLink
+from stard.links.spi_link import UartLink
 
 
 class FakeSerial:
