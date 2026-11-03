@@ -210,7 +210,57 @@ typedef enum {
 #define POLL_PERIOD_MS         1000  /* 1 Hz status exchange */
 
 /* ===================================================================== *
- * 10. Compile-time consistency checks
+ * 10. Mode broadcast (MSG_POLL payload) and rate selectors
+ *
+ * The ESP tells the Pi what STATE it is in, every cycle, rather than
+ * sending edge commands like "start recording". On a link with no
+ * handshake and no retransmission, a missed command is lost forever,
+ * whereas a missed state broadcast is corrected 100 ms later. Same
+ * principle as the REXUS discretes: levels over edges on an unreliable
+ * link.
+ *
+ * The Pi reacts to the broadcast idempotently: if the mode says the
+ * camera should be at the high rate and it is not, it changes it.
+ * MSG_COMMAND stays for genuine one-shot ground actions (WIPE, TEST).
+ * ===================================================================== */
+
+typedef enum {
+    CAM_RATE_OFF  = 0,   /* not recording */
+    CAM_RATE_SLOW = 1,   /* ground / standby cadence */
+    CAM_RATE_HIGH = 2    /* experiment cadence */
+} camera_rate_t;
+
+typedef enum {
+    LOG_RATE_OFF     = 0,   /* not logging */
+    LOG_RATE_NOMINAL = 1,   /* SED table 4.15 unified cadence */
+    LOG_RATE_HIGH    = 2    /* increased in flight, SED 4.8.2.1.3 */
+} log_rate_t;
+
+/* MSG_POLL payload layout, LEN_POLL = 8 bytes.
+     [0]     software_mode_t
+     [1]     flag bits, below
+     [2]     camera_rate_t
+     [3]     log_rate_t
+     [4..7]  mission time, milliseconds, little-endian uint32
+   The timestamp is the periodic sync of SED 4.8.2.2: the Pi has no
+   independent mission reference and computes its own timestamps from
+   this, so imaging stays correctly stamped through a link outage. */
+#define POLL_OFF_MODE      0
+#define POLL_OFF_FLAGS     1
+#define POLL_OFF_CAM_RATE  2
+#define POLL_OFF_LOG_RATE  3
+#define POLL_OFF_TIME_MS   4
+
+#define POLL_FLAG_SODS     0x01u   /* data storage gate, T-180 s */
+#define POLL_FLAG_SOE      0x02u
+#define POLL_FLAG_LO       0x04u
+#define POLL_FLAG_FLIGHT   0x08u   /* LO or launch detected by the IMU */
+
+_Static_assert(POLL_OFF_TIME_MS + 4 == LEN_POLL,
+               "MSG_POLL payload layout does not fill LEN_POLL exactly");
+
+/* ===================================================================== *
+ * 11. Compile-time consistency checks
  *
  * Each of these has failed in a real edit at some point, or would have.
  * They cost nothing at run time.

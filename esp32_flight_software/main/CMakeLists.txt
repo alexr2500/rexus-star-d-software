@@ -2,6 +2,7 @@ idf_component_register(
     SRCS "main.c"
          "mode_manager.c"
          "state_machine.c"
+         "mode_executor.c"
          "error_manager.c"
          "health_monitor.c"
          "telemetry.c"

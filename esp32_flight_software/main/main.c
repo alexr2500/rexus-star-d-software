@@ -12,6 +12,7 @@
 #include "temperature_control.h"
 #include "telemetry.h"
 #include "watchdog.h"
+#include "mode_executor.h"
 
 #include "crc16.h"
 #include "spi_interface.h"
@@ -92,6 +93,7 @@ void app_main(void)
     post_passed = power_on_self_test();
     health_monitor_init();
     temperature_control_init();
+    mode_executor_init();
     telemetry_init();
 
     /* 6. Only now is a mode meaningful. */
@@ -112,6 +114,11 @@ void app_main(void)
         /* mode_inputs_collect samples the discretes and leaves
            startup_complete and tests_passed as we set them. */
         mode_inputs_collect(&inputs);
+
+        /* MODE_T latches its verdict in mode_executor; state_machine
+           needs it to leave MODE_T and go back to NG. */
+        inputs.tests_passed = mode_executor_tests_complete()
+                           && mode_executor_tests_passed();
 
         /* --- decide --------------------------------------------------- */
         const software_mode_t current = software_mode_get();
@@ -137,13 +144,24 @@ void app_main(void)
             (void)temperature_control_override(heat_on, heat_secs);
         }
 
-        /* TODO: mode_execute(next) -- the per-mode actions (pump,
-           microscope stage, camera commands to the Pi) are not written
-           yet. The modes themselves transition correctly without it. */
+        /* What the mode actually DOES. SODS is read here rather than
+           through mode_inputs_t: it gates data storage and video, and
+           never changes the mode. */
+        mode_executor_run(next,
+                          rs422_SODS_get(),
+                          inputs.soe,
+                          inputs.flight_confirmed);
 
         /* --- outputs -------------------------------------------------- */
-        error_update_pi_status((camera_status_t)CAM_UNKNOWN,
-                               SSD_VALUE_UNKNOWN, false);
+        camera_status_t  cam  = CAM_UNKNOWN;
+        uint8_t          ssd  = SSD_VALUE_UNKNOWN;
+        bool             prelo = false;
+        command_result_t res  = RESULT_NONE;
+        if (spi_pi_link_take_status(&cam, &ssd, &prelo, &res)) {
+            error_update_pi_status(cam, ssd, prelo);
+            telemetry_set_camera_status(cam);
+            telemetry_set_ssd_free_gb(ssd);
+        }
         telemetry_task();
 
         /* --- housekeeping --------------------------------------------- */
