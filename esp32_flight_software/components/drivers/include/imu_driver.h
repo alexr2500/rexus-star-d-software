@@ -1,28 +1,34 @@
 #ifndef IMU_DRIVER_H
 #define IMU_DRIVER_H
 
-#include <stdbool.h>
 #include <stdint.h>
+#include <stdbool.h>
+#include "esp_err.h"
 
-/* LSM6DSM accelerometer + gyroscope, SPI.
- *
- * Ranges are fixed by protocol.h: IMU_ACCEL_SCALE_MG 0.488 is +/-16 g
- * and IMU_GYRO_SCALE_MDPS 70.0 is +/-2000 dps. Do not change either
- * without changing protocol.h and the Pi's framing in the same commit.
- *
- * +/-16 g is also what makes launch detection possible - peak launch
- * acceleration must fit inside it. Confirm against the REXUS User
- * Manual acceleration profile.
- */
+/* LSM6DSM (U4) on the shared sensor SPI bus, INT1 on GPIO18. */
 
-bool imu_init(void);
+typedef struct {
+    int16_t ax, ay, az;   /* raw accelerometer counts */
+    int16_t gx, gy, gz;   /* raw gyroscope counts     */
+} imu_sample_t;
 
-/* Six raw values, LSB as above. accel[] and gyro[] are X, Y, Z in the
- * sensor's own frame.
- * TODO: which index is along the rocket axis depends on how the PCB
- * sits in the structure. Verify by tilting the assembled hardware, not
- * by reading the drawing.
- */
-bool imu_read(int16_t accel[3], int16_t gyro[3]);
+/* Scale at the configured full scale. Kept here so sensors.c and the
+   ground station convert with the same numbers rather than two copies. */
+#define IMU_ACCEL_MG_PER_LSB    0.488f    /* +-16 g  */
+#define IMU_GYRO_MDPS_PER_LSB   70.0f     /* +-2000 dps */
+
+esp_err_t imu_driver_init(void);
+
+/* Reads all six axes in one burst. Returns ESP_OK and fills *out, or an
+   error with *out untouched. */
+esp_err_t imu_driver_read(imu_sample_t *out);
+
+/* True when a new sample is waiting. Reads the INT1 pin, which costs no
+   SPI traffic — unlike polling STATUS_REG. */
+bool imu_driver_data_ready(void);
+
+/* WHO_AM_I as read at init. 0x6A means the part answered correctly;
+   0x00 or 0xFF almost always means the bus or the CS line is wrong. */
+uint8_t imu_driver_whoami(void);
 
 #endif /* IMU_DRIVER_H */

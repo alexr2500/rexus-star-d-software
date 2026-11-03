@@ -1,36 +1,39 @@
 #ifndef GPIO_DRIVER_H
 #define GPIO_DRIVER_H
 
+#include <stdint.h>
 #include <stdbool.h>
 
-/* Board digital outputs: heaters and stepper enables.
- *
- * Exists so no other module writes a raw pin number. temperature_control
- * decides WHEN the heaters are on; this decides WHICH pins that means.
- * One board revision then touches one file.
- *
- * The RXSM inputs are NOT here - they belong to rs422_interface, which
- * owns their debouncing and polarity.
- */
+/* Drives everything on the board that is a plain output: the heaters and
+   the two stepper motors. Holds no policy — temperature_control.c decides
+   when heat is wanted, this decides which pins move. */
 
-/* Configures every output and drives them all inactive. Call before
-   anything else: a heater or a stepper that comes up enabled because a
-   pin floated through boot is the worst possible start. */
 void gpio_driver_init(void);
 
-/* All three heater channels together. They share one HEATER_FAULT bit
-   and there is no per-channel feedback, so treating them as one zone is
-   the only thing the error word can currently express. */
+/* ---- heaters: three enable lines, four physical channels, one zone ---- */
 void gpio_driver_heaters_set(bool on);
 bool gpio_driver_heaters_get(void);
 
-/* The A4988/TMC2209 enable is active LOW; this function takes the
-   logical sense and inverts internally, so callers never think about it.
+/* ---- syringe pump, TMC2209 ------------------------------------------- */
+void gpio_driver_pump_enable(bool enable);
+void gpio_driver_pump_direction(bool forward);
+/* One STEP pulse. Blocks for PUMP_PULSE_WIDTH_US only (~2 us), never for
+   the step interval: the caller spaces the pulses, so a long move cannot
+   stall the control loop. */
+void gpio_driver_pump_pulse(void);
 
-   De-energise when idle: the 28BYJ-48 runs hot, and this one sits in a
-   temperature-controlled vessel next to PLA that softens around 60 degC.
-   TODO: the de-energise-when-idle policy is still not in the CONOPS. */
-void gpio_driver_steppers_enable(bool enable);
-void gpio_driver_stepper_dir(bool forward);
+/* ---- microscope stage, ULN2003 --------------------------------------- *
+ * Half-step sequence, 8 states. dir = +1 or -1; any other value is
+ * ignored. Advances one half-step per call and returns immediately.    */
+void gpio_driver_stage_step(int8_t dir);
+
+/* De-energise all four coils. Call this whenever the stage is not moving:
+   a ULN2003 has no enable pin, so a coil left high burns current and heat
+   for as long as it stays high. */
+void gpio_driver_stage_release(void);
+
+/* Where the sequence currently sits (0-7). Position is not tracked —
+   the stage has no encoder and no limit switch on this board. */
+uint8_t gpio_driver_stage_phase(void);
 
 #endif /* GPIO_DRIVER_H */

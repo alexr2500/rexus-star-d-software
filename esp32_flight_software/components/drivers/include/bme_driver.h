@@ -1,30 +1,36 @@
 #ifndef BME_DRIVER_H
 #define BME_DRIVER_H
 
-#include <stdbool.h>
 #include <stdint.h>
+#include "esp_err.h"
+#include "driver/gpio.h"
 
-/* Two BME280s on the sensor SPI bus: one inside the pressure vessel
- * (CS_BME280), one outside (CS_BME280_OUT).
- *
- * Outputs are already scaled to protocol.h units, so nothing downstream
- * sees a float:
- *   temp     0.01 degC/LSB   (BME_TEMP_SCALE_C)
- *   pressure 2 Pa/LSB        (BME_PRESSURE_SCALE_PA)
- *   humidity 0.01 %RH/LSB    (BME_HUMIDITY_SCALE_RH)
- */
+/* BME280, two of them on the shared sensor SPI bus:
+     internal  U2    CS GPIO10   (inside the pressure vessel)
+     external  J7.6  CS GPIO11   (outside, ambient)
+   Both are driven through one set of functions with an instance handle,
+   so there is one copy of the compensation code, not two. */
 
 typedef enum {
-    BME_INTERNAL = 0,   /* inside the PV */
-    BME_EXTERNAL = 1,   /* ambient       */
+    BME_INTERNAL = 0,
+    BME_EXTERNAL = 1,
     BME_COUNT
 } bme_id_t;
 
-bool bme_init(bme_id_t id);
+typedef struct {
+    int32_t  temperature_centi_c;  /* 0.01 C     : 2150 == 21.50 C */
+    uint32_t pressure_pa;          /* Pa         : 101325 == 1 atm */
+    uint32_t humidity_centi_pct;   /* 0.01 %RH   : 4523 == 45.23 % */
+} bme_sample_t;
 
-bool bme_read(bme_id_t id,
-              int16_t  *temp_raw,
-              uint16_t *pressure_raw,
-              uint16_t *humidity_raw);
+/* Brings up both devices. Returns the first error encountered; use
+   bme_driver_present() to find out which one answered. */
+esp_err_t bme_driver_init(void);
+
+/* True if that device returned the correct chip ID at init. */
+bool bme_driver_present(bme_id_t id);
+
+/* Reads and compensates one device. *out untouched on error. */
+esp_err_t bme_driver_read(bme_id_t id, bme_sample_t *out);
 
 #endif /* BME_DRIVER_H */
