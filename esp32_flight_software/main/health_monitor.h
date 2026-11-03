@@ -4,16 +4,23 @@
 #include <stdbool.h>
 #include "sensors.h"
 
-/* Turns a sensor snapshot into error-word bits 0-5 and 10.
- *
- * Limits come from main/telemetry_flags.md. If the two ever disagree,
- * the markdown is the specification and this file is the bug.
- *
- * flight_confirmed suppresses the external pressure range check: above
- * roughly 9 km the external BME280 is legitimately below its 300 hPa
- * floor, and flagging that would mark a working sensor faulty for most
- * of the flight. telemetry_flags.md bit 2 says exactly this.
- */
-void health_monitor_check(const sensor_snapshot_t *s, bool flight_confirmed);
+/* Turns readings into judgements. Owns no hardware and stores no
+   readings: it is handed a snapshot and decides what is wrong with it.
+
+   Limits are in RAW units, matching sensor_snapshot_t, so no float
+   arithmetic runs in the health path. */
+
+void health_monitor_init(void);
+
+/* Evaluates one snapshot and latches whatever error bits apply.
+   flight_confirmed suppresses the checks that only make sense on the
+   ground -- ambient pressure above all, which legitimately collapses
+   once the rocket is above the atmosphere. */
+void health_monitor_update(const sensor_snapshot_t *s, bool flight_confirmed);
+
+/* True when the IMU has produced the same reading for too long. A
+   sensor that has stopped updating still returns a valid-looking
+   number; only comparing samples over time catches it. */
+bool imu_is_frozen(void);
 
 #endif /* HEALTH_MONITOR_H */

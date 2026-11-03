@@ -1,28 +1,30 @@
 #ifndef I2C_INTERFACE_H
 #define I2C_INTERFACE_H
 
-#include <stdbool.h>
 #include <stdint.h>
-#include <stddef.h>
+#include "esp_err.h"
 
-/* I2C master. Exactly one device: the SLF3S-1300F flow sensor.
- * Everything else on this board is SPI (SED 4.8.2.2, and the CS_* nets
- * in the schematic).
- *
- * Every call has a timeout and returns false rather than blocking. An
- * I2C bus can hang indefinitely if a slave holds SDA low, and a sensor
- * read must never be able to stall the task that feeds the watchdog.
- */
+/* I2C bus and the one device on it: the Sensirion SLF3S-1300F liquid flow
+   sensor, off-board on J4 (SDA on J4.2, SCL on J4.5).
+   It is the only I2C device on this board; everything else is SPI. */
 
-void i2c_interface_init(void);
+/* Brings up the bus and puts the sensor into continuous measurement. */
+esp_err_t i2c_interface_init(void);
 
-bool i2c_write(uint8_t addr7, const uint8_t *data, size_t len);
-bool i2c_read(uint8_t addr7, uint8_t *data, size_t len);
+/* One measurement. Raw counts, scaled by the caller:
+     flow_raw  / SLF3S_SCALE_FLOW_WATER  -> ml/min
+     temp_raw  / SLF3S_SCALE_TEMP        -> degrees C
+   flags carries the sensor's own status bits (air-in-line, high flow).
+   Any of the three pointers may be NULL if that value is not wanted. */
+esp_err_t i2c_interface_read_flow(int16_t *flow_raw,
+                                  int16_t *temp_raw,
+                                  uint16_t *flags);
 
-/* Sensirion devices return data as 16-bit words each followed by a
-   CRC-8 byte. This checks and strips it. A CRC mismatch is what
-   telemetry_flags.md bit 3 means by "CRC mismatch on the sensor word" -
-   a different CRC entirely from the CRC-16 used for framing. */
-bool i2c_read_sensirion(uint8_t addr7, uint16_t *words, size_t nwords);
+#define SLF3S_SCALE_FLOW_WATER  500   /* counts per ml/min, water calibration */
+#define SLF3S_SCALE_TEMP        200   /* counts per degree C */
+
+/* Flag bits inside the third word, per the SLF3S datasheet. */
+#define SLF3S_FLAG_AIR_IN_LINE  0x0002u
+#define SLF3S_FLAG_HIGH_FLOW    0x0004u
 
 #endif /* I2C_INTERFACE_H */

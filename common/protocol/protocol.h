@@ -3,100 +3,64 @@
 
 #include <stdint.h>
 
-/* Shared ESP32 <-> Raspberry Pi contract.
+/* Shared ESP32 <-> Raspberry Pi <-> ground contract.
  *
- * Hand-mirrored by raspberry_pi_software/src/stard/links/protocol.py.
- * The two files must change in the SAME COMMIT, always. There is no
- * generator and no check - only this comment and discipline.
- *
- * TRANSPORT: SPI, ESP32 as slave, Pi as master.
- * The Pi owns SCLK and CS because Linux spidev is master-only. That is
- * electrical, not architectural: the Pi clocks the bus at a fixed rate
- * and decides nothing; the ESP32 chooses the content of every one of
- * its own frames. The message catalogue below is unchanged from the
- * UART design for exactly that reason.
+ * This file has a twin: raspberry_pi_software/src/stard/links/protocol.py.
+ * Every constant below that the Pi also uses must be changed in both files
+ * in the same commit. There is no code generation between them; the only
+ * thing keeping them in step is discipline.
  */
 
-/* ===================================================================
+/* ===================================================================== *
  * 1. Framing
- * =================================================================== */
+ * ===================================================================== */
 
-#define PROTO_SYNC0          0xAA   /* alternating patterns: unlikely  */
-#define PROTO_SYNC1          0x55   /* to occur in sensor data         */
+#define PROTO_SYNC0          0xAA   /* alternating byte patterns, so a receiver
+                                       that joins mid-stream can find a frame
+                                       boundary without a length prefix */
+#define PROTO_SYNC1          0x55
 #define PROTO_OVERHEAD_BYTES 6      /* 2 sync + 1 ID + 1 length + 2 CRC */
-#define PROTO_MAX_PAYLOAD    42     /* SPI_FRAME_LEN - PROTO_OVERHEAD_BYTES */
+#define PROTO_MAX_PAYLOAD    42     /* largest defined payload is 34 bytes;
+                                       the ceiling is SPI_FRAME_LEN minus
+                                       overhead, asserted at the bottom */
 
-/* CRC-16/CCITT-FALSE over [ID, length, payload]. The sync bytes are a
-   framing marker, not data, and are excluded. Poly 0x1021, init 0xFFFF,
-   no reflection, no final XOR. Check value "123456789" -> 0x29B1. */
-
-/* ===================================================================
- * 2. SPI transport                                            [NEW]
- * =================================================================== */
-
-/* Every transaction is this many bytes in BOTH directions, always.
-   Full duplex: the ESP32 shifts out its frame while the Pi shifts out
-   STATUS. A frame shorter than this is zero-padded; the receiver's
-   parser scans for sync bytes and discards the padding, so no length
-   negotiation is needed.
-
-   48 fits the largest real frame (SENSOR_DATA: 34 + 6 = 40) with
-   headroom, and is 4-byte aligned for DMA. */
-#define SPI_FRAME_LEN        48
-
-/* A frame that cannot fit in one transaction cannot be sent at all.
-   Better to break the build than to discover it on the bench. */
-_Static_assert(LEN_SENSOR_DATA + PROTO_OVERHEAD_BYTES <= SPI_FRAME_LEN,
-               "SENSOR_DATA no longer fits one SPI transaction");
-
-/* SPI mode 0 (CPOL=0, CPHA=0). Both ends must agree exactly: a mode
-   mismatch shifts every bit by one clock and produces garbage that
-   occasionally still contains a valid-looking sync pair. */
-#define SPI_MODE             0
-
-/* Conservative for a first bring-up over whatever cable length the
-   harness ends up being. Raise only after the link is proven.
-   TODO: measure margin at the flight cable length. */
-#define SPI_CLOCK_HZ         1000000
-
-/* ESP32 -> Pi. High means "my TX buffer is armed, you may clock".
-   Without it the Pi can clock while the slave has nothing loaded, and
-   the ESP32 shifts out whatever was last in its DMA buffer: stale data
-   with a valid CRC, which is worse than noise. The Pi MUST wait on
-   this line before every transaction. */
-/* (the GPIO number itself is board truth, not protocol) */
-
-/* ===================================================================
- * 3. Message IDs
- * =================================================================== */
+/* ===================================================================== *
+ * 2. Message IDs
+ * ===================================================================== */
 
 typedef enum {
     MSG_POLL        = 0x01,   /* ESP32 -> Pi */
     MSG_COMMAND     = 0x02,   /* ESP32 -> Pi */
     MSG_STATUS      = 0x03,   /* Pi -> ESP32 */
     MSG_SENSOR_DATA = 0x04,   /* ESP32 -> Pi */
-    MSG_IDLE        = 0x05    /* either way: "alive, nothing to say" */
+    MSG_IDLE        = 0x05    /* ESP32 -> Pi, nothing to say this cycle.
+                                 The Pi clocks every cycle whether or not the
+                                 ESP has new data, so there has to be a frame
+                                 meaning "no content" that still carries a
+                                 sequence number and a valid CRC. Without it
+                                 a quiet cycle is indistinguishable from a
+                                 dead link. */
 } message_id_t;
 
-/* MSG_IDLE exists so "the ESP is running but had nothing queued this
-   slot" is distinguishable from "the ESP never loaded its buffer".
-   Zero-padding would make those two look identical, and the whole
-   point of the handshake line is that they are different faults. */
+/* ===================================================================== *
+ * 3. Payload lengths
+ *
+ * Fixed per message type, so a receiver can reject a frame whose declared
+ * length does not match its ID before parsing any of it.
+ * ===================================================================== */
 
-/* ===================================================================
- * 4. Payload lengths
- * =================================================================== */
+#define LEN_POLL         8
+#define LEN_COMMAND      2
+#define LEN_STATUS       4
+#define LEN_SENSOR_DATA  34
+#define LEN_IDLE         0
 
-#define LEN_POLL        8
-#define LEN_COMMAND     2
-#define LEN_STATUS      4
-#define LEN_SENSOR_DATA 34    /* fixed, so a receiver can reject a
-                                 truncated or corrupted payload */
-#define LEN_IDLE        0
-
-/* ===================================================================
- * 5. Enum catalogue
- * =================================================================== */
+/* ===================================================================== *
+ * 4. Enum catalogue
+ *
+ * Zero means "safe" or "unknown" in every enum here, so a zeroed buffer
+ * or a dropped field never decodes as a confident wrong answer.
+ * ===================================================================== */
 
 typedef enum {
     TIME_UNSYNCED  = 0,
@@ -132,15 +96,18 @@ typedef enum {
     RESULT_FAILED  = 3
 } command_result_t;
 
-/* ===================================================================
- * 6. Sentinels and thresholds
- * =================================================================== */
+/* ===================================================================== *
+ * 5. Sentinel values and error bits
+ * ===================================================================== */
 
-#define SSD_VALUE_UNKNOWN     0xFF   /* NOT 255 GB. A third state. */
-#define LOW_SSD_GB            20
-#define LOW_SSD_FOR_FLIGHT_GB 100
+#define SSD_VALUE_UNKNOWN      0xFF
+#define LOW_SSD_GB             20
+#define LOW_SSD_FOR_FLIGHT_GB  100
 
-/* See telemetry_flags.md for descriptions and latching behaviour. */
+/* Bit positions in the 32-bit error word. Descriptions and latching
+   behaviour: main/telemetry_flags.md. The macro names here are the
+   authoritative spelling -- the document must match these, not the
+   other way round. */
 
 #define ERR_BIT_PT100                       0
 #define ERR_BIT_INT_BME                     1
@@ -163,52 +130,111 @@ typedef enum {
 #define ERR_BIT_CSV_WRITE                   18
 #define ERR_BIT_CONFIG_LOAD                 19
 #define ERR_BIT_VIDEO_SHUTDOWN_INCOMPLETE   20
-/* Bits 21-31 reserved, transmitted as zero. */
+/* Bits 21-31 reserved, transmitted as zero. error_manager.h asserts that
+   nothing latches there. */
 
-/* ===================================================================
- * 7. Sensor scale factors (multiply raw by scale)
- * =================================================================== */
+/* ===================================================================== *
+ * 6. Sensor scale factors (multiply raw by scale to get engineering units)
+ * ===================================================================== */
 
-#define IMU_ACCEL_SCALE_MG    0.488f   /* LSM6DSM at +/-16 g    */
-#define IMU_GYRO_SCALE_MDPS   70.0f    /* LSM6DSM at +/-2000 dps */
-#define BME_TEMP_SCALE_C      0.01f
-#define BME_PRESSURE_SCALE_PA 2.0f
-#define BME_HUMIDITY_SCALE_RH 0.01f
-#define PT100_TEMP_SCALE_C    0.01f
-#define SLF3S_FLOW_SCALE      0.002f
+#define IMU_ACCEL_SCALE_MG     0.488f   /* +-16 g full scale  */
+#define IMU_GYRO_SCALE_MDPS    70.0f    /* +-2000 dps         */
+#define BME_TEMP_SCALE_C       0.01f
+#define BME_PRESSURE_SCALE_PA  2.0f
+#define BME_HUMIDITY_SCALE_RH  0.01f
+#define PT100_TEMP_SCALE_C     0.01f
+#define SLF3S_FLOW_SCALE       0.002f   /* 1/500, water calibration */
 
-/* ===================================================================
- * 8. Timing
- * =================================================================== */
+/* ===================================================================== *
+ * 7. ESP32 <-> Pi SPI link
+ *
+ * The Pi is the SPI MASTER and the ESP32 the SLAVE (SED table 4.13),
+ * because Linux spidev is master-only. The ESP32 is still the LOGICAL
+ * master: it decides the content of every frame; the Pi only turns the
+ * crank at a fixed rate.
+ *
+ * J3 carries four wires -- CS, CLK, MOSI, MISO -- and no handshake line,
+ * so the ESP cannot tell the Pi "my buffer is armed". The link therefore
+ * runs one cycle behind: what the ESP loads now is read on the NEXT
+ * transaction. See spi_pi_link.h.
+ * ===================================================================== */
 
-/* --- RS-422 to the RXSM (unrelated to the Pi link) ------------------ */
-#define TCU_BAUD_RATE 115200   /* REXUS ICD default, 8N1 */
+#define SPI_FRAME_LEN             48        /* every transaction is exactly this
+                                               long in both directions, whatever
+                                               the payload, so neither side has
+                                               to agree a length beforehand */
+#define SPI_MODE                  0         /* CPOL = 0, CPHA = 0 */
+#define SPI_CLOCK_HZ              1000000
+#define SPI_TRANSACTION_PERIOD_MS 100       /* 10 Hz, set by the Pi */
 
-/* --- Pi link -------------------------------------------------------- */
+/* ===================================================================== *
+ * 8. TCU / RXSM serial link
+ * ===================================================================== */
 
-/* The Pi clocks one transaction this often. It is the Pi's job to hold
-   this rate; the ESP32 cannot enforce it as a slave. */
-#define SPI_TRANSACTION_PERIOD_MS 100   /* 10 Hz */
+#define TCU_BAUD_RATE  115200
 
-/* Slot allocation. The ESP32 sends SENSOR_DATA in nine slots out of
-   ten and POLL in the tenth, giving the same 10 Hz / 1 Hz cadences the
-   UART design had. COMMAND displaces a SENSOR_DATA slot when one is
-   pending. */
-#define SENSOR_DATA_PERIOD_MS 100
-#define POLL_PERIOD_MS        1000
+/* ===================================================================== *
+ * 9. Link health
+ *
+ * The degraded flag is defined in TIME, not in frame counts. The original
+ * design intent was "about 3 seconds of silence sets it, about 5 seconds
+ * of good traffic clears it", chosen when the link ran at 1 Hz and the
+ * counts therefore happened to be 3 and 5.
+ *
+ * The link now runs at 10 Hz. Keeping the counts at 3 and 5 would mean
+ * 300 ms and 500 ms, and a Linux machine flushing video to disk will
+ * exceed 300 ms while perfectly healthy -- so the old numbers would raise
+ * a false degraded flag in normal operation.
+ *
+ * Deriving the counts from the period keeps the intent intact and makes
+ * the link rate the only thing anyone has to change.
+ *
+ * ACTION: SED v3-1 table 4.13 still states "3 consecutive invalid or
+ * stale frames, cleared after 5 valid frames". It must be updated to
+ * quote the times (3 s / 5 s) rather than the counts, before EAR.
+ * ===================================================================== */
 
-/* How long the ESP32 waits for a transaction before calling it a miss.
-   Replaces REPLY_TIMEOUT_MS, which is meaningless on a full-duplex bus
-   where the reply arrives in the same transaction as the request. */
-#define PI_LINK_TIMEOUT_MS 300
+#define PI_DEGRADED_SET_MS    3000   /* silence before the flag is raised  */
+#define PI_DEGRADED_CLEAR_MS  5000   /* good traffic before it is lowered  */
 
-/* Link health, now counted per TRANSACTION (10 Hz) rather than per
-   poll (1 Hz). The counts were raised to preserve the original time
-   constants - 3 missed transactions is 300 ms, which a Linux box
-   writing video to an SSD will hit without being faulty.
-       30 misses    = 3 s of silence   -> PI_DEGRADED
-       50 successes = 5 s of good link -> clear it                    */
-#define MISS_COUNT_DEGRADED          30
-#define SUCCESS_COUNT_CLEAR_DEGRADED 50
+#define MISS_COUNT_DEGRADED \
+    (PI_DEGRADED_SET_MS / SPI_TRANSACTION_PERIOD_MS)            /* 30 at 10 Hz */
+#define SUCCESS_COUNT_CLEAR_DEGRADED \
+    (PI_DEGRADED_CLEAR_MS / SPI_TRANSACTION_PERIOD_MS)          /* 50 at 10 Hz */
+
+/* How long a single transaction may be late before it counts as missing.
+   Three periods: tolerant of one skipped cycle, not of two. */
+#define PI_LINK_TIMEOUT_MS  (3 * SPI_TRANSACTION_PERIOD_MS)
+
+#define SENSOR_DATA_PERIOD_MS  100   /* 10 Hz, matches the SPI rate */
+#define POLL_PERIOD_MS         1000  /* 1 Hz status exchange */
+
+/* ===================================================================== *
+ * 10. Compile-time consistency checks
+ *
+ * Each of these has failed in a real edit at some point, or would have.
+ * They cost nothing at run time.
+ * ===================================================================== */
+
+_Static_assert(LEN_SENSOR_DATA + PROTO_OVERHEAD_BYTES <= SPI_FRAME_LEN,
+               "SENSOR_DATA no longer fits in one SPI transaction");
+
+_Static_assert(PROTO_MAX_PAYLOAD + PROTO_OVERHEAD_BYTES <= SPI_FRAME_LEN,
+               "PROTO_MAX_PAYLOAD exceeds what one SPI transaction can carry");
+
+_Static_assert(LEN_SENSOR_DATA <= PROTO_MAX_PAYLOAD,
+               "SENSOR_DATA is larger than the declared maximum payload");
+
+_Static_assert(MISS_COUNT_DEGRADED >= 1 && SUCCESS_COUNT_CLEAR_DEGRADED >= 1,
+               "degraded thresholds rounded down to zero: the SPI period is "
+               "longer than the time windows, so the flag could never work");
+
+_Static_assert(SUCCESS_COUNT_CLEAR_DEGRADED > MISS_COUNT_DEGRADED,
+               "clearing the degraded flag must be harder than setting it, "
+               "or the link will oscillate in and out of degraded");
+
+_Static_assert(SENSOR_DATA_PERIOD_MS >= SPI_TRANSACTION_PERIOD_MS,
+               "sensor frames are produced faster than the Pi can collect "
+               "them: samples would be overwritten before being read");
 
 #endif /* PROTOCOL_H */

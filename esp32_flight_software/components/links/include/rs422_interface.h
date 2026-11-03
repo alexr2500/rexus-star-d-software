@@ -1,36 +1,47 @@
 #ifndef RS422_INTERFACE_H
 #define RS422_INTERFACE_H
 
+#include <stdint.h>
 #include <stdbool.h>
 
-/* The three RXSM discrete signals.
+/* The three REXUS service discretes: LO, SOE, SODS.
  *
- * ALL THREE ARE LEVELS, NOT EVENTS. REXUS ICD 2.2: "LO switches are
- * directly linked to the umbilical LO signal and therefore switches
- * immediately with the event of umbilical extraction and stays active
- * during the flight."
+ * The name is historical. These are NOT RS-422 -- they are open-collector
+ * switch lines from the RXSM that sink current when active (REXUS ICD
+ * table 2.2), wired straight to GPIO1, GPIO2 and GPIO14 on this board
+ * revision. The RS-422 telemetry link is uart_tcu.h.
  *
- * So the getters have NO side effects and may be called any number of
- * times. The previous version of this file read-and-cleared LO, which
- * meant a single stray debug read swallowed lift-off permanently. It
- * also made a watchdog reboot unrecoverable - with levels, the firmware
- * re-reads three pins after a reset and knows exactly where it is.
- *
- * If a caller needs an EDGE, it compares against its own previous
- * value. That is the caller's business, not this interface's.
- *
- * ELECTRICALLY ACTIVE LOW. They are open-collector switches that sink
- * current on activation (ICD 2.2), so asserted reads 0 at the GPIO.
- * This module inverts; nothing above it should ever think about it.
+ * LEVELS, NOT EVENTS. The ICD says the LO switch "stays active during the
+ * flight", so LO is a condition that holds, not a pulse that arrives. The
+ * getters below are pure reads with no side effects: calling one does not
+ * consume anything, and any number of callers may read the same signal in
+ * the same cycle. state_machine.c depends on that.
  */
 
+/* Configures the three pins as inputs with internal pull-ups and primes
+   the debounce history from the current pin states. */
 void rs422_init(void);
 
-/* Sample and debounce all three. Call at a steady rate. */
-void rs422_receive(void);
+/* Takes one sample of all three pins and advances the debounce filter.
+   Call at a steady rate from the control loop. The getters report the
+   filtered state, so they are only as fresh as the last call to this. */
+void rs422_sample(void);
 
+/* Debounced levels. True means the signal is ASSERTED. */
 bool rs422_LO_get(void);
 bool rs422_SOE_get(void);
 bool rs422_SODS_get(void);
+
+/* True once LO has been asserted at any point since boot, and never
+   false again. Survives a dropout on the LO line; does not survive a
+   reset, which is what ERR_BIT_WATCHDOG_RESET is for. */
+bool rs422_LO_ever_asserted(void);
+
+/* Raw, undebounced pin states, for the self-test and for ground
+   diagnosis of a harness. Not for flight logic. */
+uint8_t rs422_raw_levels(void);
+#define RS422_RAW_LO   0x01u
+#define RS422_RAW_SOE  0x02u
+#define RS422_RAW_SODS 0x04u
 
 #endif /* RS422_INTERFACE_H */

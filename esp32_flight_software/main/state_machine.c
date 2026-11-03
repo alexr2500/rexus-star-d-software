@@ -1,154 +1,143 @@
-/* Mode transition table. Mirrors SED 4.8.2.1.2 (activation criteria) and
- * 4.8.2.1.3 (state machine). If this file and the SED ever disagree, one
- * of them is a bug - they are the same specification written twice.
- *
- * Split in two on purpose:
- *   mode_inputs_collect()  touches hardware, decides nothing
- *   mode_next()            decides everything, touches no hardware
- * so every transition can be exercised on a laptop by filling the struct.
- */
-
 #include "state_machine.h"
 #include "mode_manager.h"
 #include "error_manager.h"
 #include "rs422_interface.h"
-#include "crc16.h"
+#include "uart_tcu.h"
+#include "health_monitor.h"
+#include "sensors.h"
+#include <stdlib.h>
+#include <stdint.h>
 
+/* Launch detection threshold, stated in m/s^2 and converted to raw IMU
+ * counts at compile time so the physical number is the one in the file.
+ *
+ * Justification: the REXUS boost reaches roughly Mach 1 (~343 m/s) in
+ * about 2 s, so mean boost acceleration is ~171 m/s^2, about 17.5 g.
+ * 50 m/s^2 (~5.1 g) is under a third of that -- comfortably detected --
+ * while being far above anything ground handling produces, especially
+ * as it must hold for LAUNCH_CONFIRM_CYCLES consecutive cycles.
+ *
+ * NOTE: the accelerometer also reads the 1 g of gravity, and at +-16 g
+ * full scale it SATURATES through the whole boost (17.5 + 1 g). That is
+ * harmless for detection -- a pegged axis is unambiguous -- but it means
+ * the boost profile itself cannot be measured with this configuration.
+ *
+ * TODO: the thrust axis is assumed to be Z. Confirm against the IMU's
+ * mounting orientation; the magnitude test below is sign-independent but
+ * not axis-independent.
+ */
+#define LAUNCH_ACCEL_MSS   50
 
-/* --- input sources not yet implemented ------------------------------- */
+/* m/s^2 -> milli-g -> raw counts. 1 g = 9.80665 m/s^2, so
+   milli_g = m/s^2 * 1000 / 9.80665 = m/s^2 * 101971 / 1000.
+   counts  = milli_g * 1000 / 488   (IMU_ACCEL_SCALE_MG is 0.488 mg/LSB) */
+#define LAUNCH_ACCEL_MG    (((int32_t)LAUNCH_ACCEL_MSS * 101971) / 1000)
+#define LAUNCH_ACCEL_RAW   ((int32_t)((LAUNCH_ACCEL_MG * 1000) / 488))
 
-/* TODO:(step 4): latched by the IMU once sustained launch acceleration is
-   seen. Returning false gives today's behaviour - LO is the only way to
-   confirm flight - so the stub fails safe rather than permissive. */
+_Static_assert(LAUNCH_ACCEL_RAW < 32767,
+               "launch threshold is outside the int16 the IMU reports");
+_Static_assert(LAUNCH_ACCEL_RAW > 4098,
+               "launch threshold is below 2 g: ground handling would trip it");
+
+/* Consecutive cycles above the threshold before launch is believed.
+   One sample is a knock; half a second is a rocket. */
+#define LAUNCH_CONFIRM_CYCLES  5
+
+static uint8_t launch_cycles;
+static bool    launch_latched;
+
+/* Launch detection exists so that a failed LO wire does not cost the
+   whole experiment. LO remains the primary signal; this is the
+   independent second opinion. */
 static bool launch_detected(void)
 {
+    if (launch_latched) return true;
+
+    sensor_snapshot_t s;
+    sensors_get(&s);
+
+    if (!(s.valid & SENSOR_VALID_IMU) || imu_is_frozen()) {
+        launch_cycles = 0;
+        return false;
+    }
+
+    /* Magnitude on the thrust axis, sign-independent until the mounting
+       orientation is confirmed. */
+    if ((int32_t)abs((int)s.az) > LAUNCH_ACCEL_RAW) {
+        if (launch_cycles < LAUNCH_CONFIRM_CYCLES) launch_cycles++;
+        if (launch_cycles >= LAUNCH_CONFIRM_CYCLES) {
+            launch_latched = true;
+            return true;
+        }
+    } else {
+        launch_cycles = 0;
+    }
     return false;
 }
-
-/* TODO:(step 3/11): set by the TEST telecommand over the RS-422 uplink.
-   No uplink parser exists yet, so MODE_T is currently unreachable. */
-static bool test_telecommand_pending(void)
-{
-    return false;
-}
-
-/* TODO: the MODE_T health sequence (SED 4.8.2.1.3: hardware, sensors,
-   power and clock, storage). Returns false until it exists, which is
-   honest: no tests have passed because no tests have run. See the
-   MODE_T case for why that does not strand the experiment. */
-static bool health_tests_passed(void)
-{
-    return false;
-}
-
-/* Power-on self test. Grows as subsystems land; today the only POST that
-   actually exists is the CRC check, and that one matters - a wrong CRC
-   invalidates every frame and every telemetry packet. */
-static bool startup_complete(void)
-{
-    /* TODO:(step 6/8): add sensor init and RS-422 configuration. */
-    return crc16_self_test();
-}
-
-
-/* --- collect ---------------------------------------------------------- */
 
 void mode_inputs_collect(mode_inputs_t *out)
 {
-    out->startup_complete = startup_complete();
-    out->test_requested   = test_telecommand_pending();
-    out->tests_passed     = health_tests_passed();
+    if (out == NULL) return;
 
-    /* Two independent routes to "we are flying". LO is one wire to one
-       connector pin; launch_detected() is our own accelerometer. Either
-       is sufficient, so a single broken wire no longer costs the flight.
-       Both are level/latched, so this stays true once it becomes true. */
+    /* One sample of all three discretes per cycle. Everything below
+       reads the debounced levels, which are side-effect free, so the
+       order of these reads does not matter. */
+    rs422_sample();
+
+    out->soe              = rs422_SOE_get();
     out->flight_confirmed = rs422_LO_get() || launch_detected();
+    out->test_requested   = uart_tcu_take_test_request();
 
-    out->soe = rs422_SOE_get();
+    /* startup_complete and tests_passed are deliberately NOT touched
+       here. They are not hardware reads -- they come from the POST and
+       from the MODE_T sequence -- so the caller sets them before
+       calling and this function leaves them alone. */
 
-    /* SODS deliberately absent: per SED 4.8.2.1.3 it starts data storage
-       inside NG and is switched off near end of flight without changing
-       mode. It is an action, not a transition input. */
+    /* SOE before LO is physically possible -- the operator can assert
+       SOE manually at any time -- but it means the timeline is not
+       running as expected, so it is worth telling the ground.
+       This check lives here, not in rs422_interface, because it is a
+       judgement about mission phase and that module only reports
+       levels. */
+    if (out->soe && !out->flight_confirmed) {
+        error_raise(ERR_BIT_UNEXPECTED_SIGNAL);
+    }
 }
-
-
-/* --- decide ----------------------------------------------------------- */
 
 software_mode_t mode_next(software_mode_t current, const mode_inputs_t *in)
 {
-    switch (current) {
+    if (in == NULL) return current;
 
+    switch (current) {
     case MODE_SU:
-        /* SED: "NG once the startup phase is complete". */
-        if (in->startup_complete) {
-            return MODE_NG;
-        }
+        if (in->test_requested)   return MODE_T;
+        if (in->startup_complete) return MODE_NG;
         return MODE_SU;
 
     case MODE_T:
-        /* SED says what happens when tests pass and is silent on failure.
-           Resolved as: leave T either way, and flag a failure.
-
-           Staying in T on failure would guarantee mission loss, because
-           NE is only reachable through NG and NF. NG is safe - no major
-           operations - and ground holds the error word, so the GO/NO-GO
-           decision belongs to the operators, not to the firmware. Never
-           strand the vehicle in a non-operational state when an
-           operational one is still safe. */
-        if (!in->tests_passed) {
-            /* TODO: allocate ERR_BIT_SELF_TEST_FAIL (bit 22 is reserved)
-               in protocol.h and telemetry_flags.md, update the reserved
-               -bits _Static_assert, and raise it here. Until then a
-               failed self test leaves no trace on the downlink, which is
-               the worst property of this file. */
-        }
-        return MODE_NG;
+        /* Testing only ends by passing. A failed self-test stays in
+           MODE_T so the problem is in front of the operator rather
+           than being carried into flight. */
+        if (in->tests_passed) return MODE_NG;
+        return MODE_T;
 
     case MODE_NG:
-        /* Flight confirmation is checked here and only here. NE is
-           reachable only through NF, so it inherits the guarantee - do
-           not add a redundant check there. */
-        if (in->flight_confirmed) {
-            return MODE_NF;
-        }
-        /* Ground only. A health-test sequence during the experiment
-           would be worse than useless, so the telecommand is refused
-           once flight is confirmed - and the order of these two tests
-           is what enforces that. */
-        if (in->test_requested) {
-            return MODE_T;
-        }
+        if (in->flight_confirmed) return MODE_NF;
         return MODE_NG;
 
     case MODE_NF:
-        /* SED: "NE after the SOE signal is received". This is the
-           transition that injects the sample. */
-        if (in->soe) {
-            return MODE_NE;
-        }
+        if (in->soe) return MODE_NE;
         return MODE_NF;
 
     case MODE_NE:
-        /* SED: "turns off when SOE is deactivated", then NF for the
-           remainder of the flight and descent. */
-        if (!in->soe) {
-            return MODE_NF;
-        }
+        /* Terminal. The experiment runs to power-off at T+600 s; there
+           is no path back, because there is no way to un-run it. */
         return MODE_NE;
 
     default:
-        /* Unreachable in a correct program: reaching it means the mode
-           variable has been corrupted. Return NG rather than the mode we
-           think we are in - it performs no major operations, and because
-           flight_confirmed latches, the NG -> NF -> NE path re-runs on
-           the next tick and the state machine heals itself.
-
-           The error_raise() here is the one impurity in this function.
-           It is confined to a path that never executes in a correct
-           program, and the alternative - losing the only evidence of
-           corruption - is worse. */
+        /* Unreachable unless memory is corrupt. Failing to the safe
+           ground mode is better than continuing in an unknown one. */
         error_raise(ERR_BIT_MODE_TRANSITION);
-        return MODE_NG;
+        return MODE_SU;
     }
 }

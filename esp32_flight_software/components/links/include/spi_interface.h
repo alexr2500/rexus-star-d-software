@@ -1,25 +1,30 @@
 #ifndef SPI_INTERFACE_H
 #define SPI_INTERFACE_H
 
-#include <stdbool.h>
+#include <stdint.h>
+#include "esp_err.h"
+#include "driver/gpio.h"
 #include "driver/spi_master.h"
 
-/* The SENSOR SPI bus, where the ESP32 is master: both BME280s, the
- * MAX31865, the LSM6DSM and the ABP.
+/* The sensor SPI bus, on which the ESP32 is MASTER.
  *
- * Separate peripheral and separate file from spi_pi_link, where the
- * ESP32 is a slave. Two SPI roles on one chip is normal; conflating
- * them in one module is not.
+ * Five devices share it: both BME280s, the LSM6DSM, the MAX31865 and the
+ * off-board ABP. Each has its own chip select and its own clock rate and
+ * SPI mode, which is why every device gets a handle rather than the bus
+ * exposing a raw transfer call.
  *
- * Call once before any driver init. Each driver then adds itself as a
- * device with its own CS, mode and clock speed - because the devices
- * disagree about all three and the bus arbitrates per transaction.
+ * This is NOT the Raspberry Pi link. That is a separate bus on separate
+ * pins where the ESP32 is the slave -- see spi_pi_link.h.
  */
-bool spi_interface_init(void);
 
-/* Convenience wrapper so the four drivers do not each repeat the
-   bus-config boilerplate. */
-bool spi_interface_add_device(int cs_pin, uint8_t mode, int clock_hz,
-                              spi_device_handle_t *out);
+/* Initialises the bus itself. Call once, before any driver init. */
+esp_err_t spi_interface_init(void);
+
+/* Attaches one device to the bus. The returned handle is what the driver
+   passes to spi_device_polling_transmit(). */
+esp_err_t spi_interface_add_device(gpio_num_t cs_pin,
+                                   int clock_hz,
+                                   uint8_t spi_mode,
+                                   spi_device_handle_t *out);
 
 #endif /* SPI_INTERFACE_H */

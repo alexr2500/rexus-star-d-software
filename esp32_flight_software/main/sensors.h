@@ -3,66 +3,70 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "protocol.h"
 
-/* One consistent snapshot of every sensor on the ESP32's buses.
+/* One consistent set of readings from every sensor on the board.
  *
- * Read and get are separate on purpose. sensors_read() talks to the
- * hardware and is slow; sensors_get() copies the latest complete
- * snapshot and is fast. Anything building a packet calls get, so it
- * always sees values from ONE instant - six separate reads during
- * packet assembly could straddle an update and produce a packet that
- * mixes two moments.
- *
- * Field order and types mirror MSG_SENSOR_DATA in protocol.h, so the
- * Pi link can serialise straight from this struct.
+ * Two questions get confused if they share a variable, so they do not:
+ *   - is this reading usable RIGHT NOW?   -> the `valid` bitmask here
+ *   - has this sensor EVER failed?        -> the latched error word in
+ *                                            error_manager
+ * A sensor that drops out for one cycle and recovers clears its valid
+ * bit and then sets it again; its error bit stays latched, because the
+ * ground needs to know it happened.
  */
 
-/* Which readings in this snapshot are trustworthy RIGHT NOW.
- *
- * Not the same question as the latched error bits: those answer "did
- * this sensor ever fail", which is what ground needs post-flight. This
- * answers "is the number next to it usable this tick", which is what
- * telemetry and the thermal loop need. Bit order matches
- * ERR_BIT_PT100..ERR_BIT_LSM6DSM so the two are easy to correlate.
- */
-#define SENSOR_VALID_PT100    (1u << 0)
-#define SENSOR_VALID_INT_BME  (1u << 1)
-#define SENSOR_VALID_EXT_BME  (1u << 2)
-#define SENSOR_VALID_SLF3S    (1u << 3)
-#define SENSOR_VALID_ABP      (1u << 4)
-#define SENSOR_VALID_IMU      (1u << 5)
-#define SENSOR_VALID_VOLTAGE  (1u << 6)
-
-/* Written into any field whose read failed. INT16_MIN is -327.68 in
-   every scaled unit we use - visibly not a reading, so a half-finished
-   build cannot be mistaken for a working one on the ground display. */
+/* Raw counts, scaled by protocol.h's *_SCALE_* factors. Fixed point
+   rather than float: the wire cost halves and no sensor here has the
+   accuracy to justify a float. */
 #define SENSOR_RAW_INVALID  INT16_MIN
 
+#define SENSOR_VALID_PT100    0x0001u
+#define SENSOR_VALID_INT_BME  0x0002u
+#define SENSOR_VALID_EXT_BME  0x0004u
+#define SENSOR_VALID_SLF3S    0x0008u
+#define SENSOR_VALID_ABP      0x0010u
+#define SENSOR_VALID_IMU      0x0020u
+
 typedef struct {
-    int16_t  ext_bme_temp;        /* 0.01 degC/LSB  */
-    uint16_t ext_bme_pressure;    /* 2 Pa/LSB       */
-    uint16_t ext_bme_humidity;    /* 0.01 %RH/LSB   */
-    int16_t  int_bme_temp;
-    uint16_t int_bme_pressure;
-    uint16_t int_bme_humidity;
-    uint16_t abp_pressure;
-    int16_t  slf3s_flow;          /* 0.002 ml/min/LSB */
-    int16_t  pt100_temp;          /* 0.01 degC/LSB  */
-    int16_t  imu_accel[3];        /* 0.488 mg/LSB, X Y Z */
-    int16_t  imu_gyro[3];         /* 70 mdps/LSB         */
-    uint16_t voltage_mV;          /* main PCB rail       */
-    uint16_t valid;               /* SENSOR_VALID_* bits */
+    uint32_t timestamp_ms;      /* when this set was taken */
+
+    int16_t  pt100_temp;        /* 0.01 C  */
+    int16_t  int_bme_temp;      /* 0.01 C  */
+    int16_t  ext_bme_temp;      /* 0.01 C  */
+    int16_t  int_bme_press;     /* BME_PRESSURE_SCALE_PA */
+    int16_t  ext_bme_press;     /* BME_PRESSURE_SCALE_PA */
+    int16_t  int_bme_hum;       /* 0.01 %RH */
+    int16_t  ext_bme_hum;       /* 0.01 %RH */
+    int16_t  slf3s_flow;        /* SLF3S_FLOW_SCALE */
+    int16_t  slf3s_temp;        /* 0.005 C, SLF3S internal */
+    int16_t  abp_pressure;      /* raw 14-bit ABP counts, 0..16383.
+                                   NOT pascals -- see abp_driver.h */
+
+    int16_t  ax, ay, az;        /* IMU_ACCEL_SCALE_MG  */
+    int16_t  gx, gy, gz;        /* IMU_GYRO_SCALE_MDPS */
+
+    uint16_t voltage_mV;        /* TODO: no source on this board revision.
+                                   GPIO_ADC (GPIO4) is the potentiometer of
+                                   SED fig. 38, not a bus-voltage monitor.
+                                   Held at 0 until hardware provides one. */
+
+    uint16_t slf3s_flags;       /* SLF3S_FLAG_* straight from the sensor */
+    uint16_t valid;             /* SENSOR_VALID_* bitmask */
 } sensor_snapshot_t;
 
-/* Bring up the buses and the devices. Call once from app_main. */
-void sensors_init(void);
+/* Brings up every sensor driver. Returns false if any failed; the
+   per-sensor outcome is visible through the valid bits after the first
+   sensors_read(). Never aborts: one dead sensor must not stop the
+   experiment. */
+bool sensors_init(void);
 
-/* Read every sensor and replace the stored snapshot. Call at
-   SENSOR_DATA_PERIOD_MS (100 ms) from the sensor task. */
+/* Performs the actual bus traffic and publishes a new snapshot.
+   Call from one task only, at the sensor rate. Slow: it talks to five
+   devices. */
 void sensors_read(void);
 
-/* Copy the latest complete snapshot. Safe to call from any task. */
+/* Returns the most recent complete snapshot. Cheap, safe from any task,
+   and never returns a half-updated set. */
 void sensors_get(sensor_snapshot_t *out);
 
 #endif /* SENSORS_H */
