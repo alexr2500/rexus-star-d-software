@@ -6,32 +6,70 @@ from stard.links import protocol
 
 @dataclass
 class Poll:
-    """Contents of a POLL message (ESP32 -> Pi)."""
+    """Contents of a POLL message (ESP32 -> Pi).
+
+    Byte layout is protocol.h section 11 / protocol.py section 9. The
+    flags byte is unpacked into named fields here so nothing downstream
+    has to know the bit positions.
+    """
     mode: protocol.SoftwareMode
-    degraded: bool
+    camera_rate: protocol.CameraRate
+    log_rate: protocol.LogRate
     mission_time_ms: int
     time_ref: protocol.TimeRef
     sods_active: bool
+    soe_active: bool
+    lo_active: bool
+    flight_confirmed: bool
+    degraded: bool
 
 
-POLL_FORMAT = "<BBiBB"
+# [0] mode, [1] flags, [2] camera rate, [3] log rate, [4..7] time ms.
+#
+# The time is SIGNED. Countdown time is negative (T-180 s is -180000),
+# and csv_manager takes abs() of it to name files, so an unsigned field
+# would turn every countdown stamp into a number near 4.29 billion.
+# Kept as a struct format like the other messages so the size assertion
+# in the tests still holds and the layout is readable in one line.
+POLL_FORMAT = "<BBBBi"
 
 
 def encode_poll(p: Poll) -> bytes:
-    return struct.pack(POLL_FORMAT, p.mode, int(p.degraded),
-                       p.mission_time_ms, p.time_ref, int(p.sods_active))
+    flags = 0
+    if p.sods_active:      flags |= protocol.POLL_FLAG_SODS
+    if p.soe_active:       flags |= protocol.POLL_FLAG_SOE
+    if p.lo_active:        flags |= protocol.POLL_FLAG_LO
+    if p.flight_confirmed: flags |= protocol.POLL_FLAG_FLIGHT
+    if p.degraded:         flags |= protocol.POLL_FLAG_DEGRADED
+    flags |= (int(p.time_ref) << protocol.POLL_TIMEREF_SHIFT) & protocol.POLL_TIMEREF_MASK
+
+    return struct.pack(POLL_FORMAT, int(p.mode), flags,
+                       int(p.camera_rate), int(p.log_rate),
+                       p.mission_time_ms)
 
 
 def decode_poll(payload: bytes) -> Poll:
     if len(payload) != protocol.LEN_POLL:
-        raise ValueError(f"POLL payload must be {protocol.LEN_POLL} bytes, got {len(payload)}")
-    mode, degraded, mission_time, time_ref, sods_active = struct.unpack(POLL_FORMAT, payload)
+        raise ValueError(
+            f"POLL payload must be {protocol.LEN_POLL} bytes, got {len(payload)}"
+        )
+
+    mode, flags, cam_rate, log_rate, mission_time_ms = struct.unpack(
+        POLL_FORMAT, payload
+    )
+    time_ref_bits = (flags & protocol.POLL_TIMEREF_MASK) >> protocol.POLL_TIMEREF_SHIFT
+
     return Poll(
         mode=protocol.SoftwareMode(mode),
-        degraded=bool(degraded),
-        mission_time_ms=mission_time,
-        time_ref=protocol.TimeRef(time_ref),
-        sods_active=bool(sods_active)
+        camera_rate=protocol.CameraRate(cam_rate),
+        log_rate=protocol.LogRate(log_rate),
+        mission_time_ms=mission_time_ms,
+        time_ref=protocol.TimeRef(time_ref_bits),
+        sods_active=bool(flags & protocol.POLL_FLAG_SODS),
+        soe_active=bool(flags & protocol.POLL_FLAG_SOE),
+        lo_active=bool(flags & protocol.POLL_FLAG_LO),
+        flight_confirmed=bool(flags & protocol.POLL_FLAG_FLIGHT),
+        degraded=bool(flags & protocol.POLL_FLAG_DEGRADED),
     )
 
 

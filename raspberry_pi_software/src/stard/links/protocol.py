@@ -41,12 +41,20 @@ SPI_DEVICE = 0
 SPI_MODE = 0                # CPOL=0, CPHA=0 -- must match the ESP32 exactly
 SPI_CLOCK_HZ = 1_000_000
 
-# ESP32 -> Pi handshake line. High means "my TX buffer is armed, you
-# may clock". The Pi MUST wait on this before every transaction:
-# clocking while the slave has nothing loaded shifts out whatever was
-# last in its DMA buffer -- stale data with a valid CRC, which is worse
-# than noise.
-# TODO: BCM pin number, once the harness is defined.
+# ESP32 -> Pi handshake line: THERE ISN'T ONE.
+#
+# J3 on the flight board carries four wires -- CS, CLK, MOSI, MISO -- and
+# no fifth pin for the ESP32 to say "my TX buffer is armed". The link
+# therefore runs one cycle behind: the ESP loads a frame and the Pi
+# reads it on the NEXT transaction, so what arrives is up to
+# SPI_TRANSACTION_PERIOD_MS old.
+#
+# That is acceptable because nothing on the Pi closes a control loop --
+# it logs and records. It is recorded here because it is a property of
+# the board, not a choice, and because the sequence number in every
+# frame is what detects a repeat rather than a handshake.
+#
+# Leave this None unless a handshake wire is actually added.
 SPI_HANDSHAKE_GPIO = None
 
 # ------------------------------------------------------- 3. Message IDs
@@ -167,9 +175,70 @@ POLL_PERIOD_MS = 1000
 # where the reply arrives in the same transaction as the request.
 PI_LINK_TIMEOUT_MS = 300
 
-# Link health, counted per TRANSACTION (10 Hz) not per poll (1 Hz).
-# Counts raised to preserve the original time constants:
-#     30 misses    = 3 s of silence   -> PI_DEGRADED
-#     50 successes = 5 s of good link -> clear it
-MISS_COUNT_DEGRADED = 30
-SUCCESS_COUNT_CLEAR_DEGRADED = 50
+# Link health is defined in TIME, not in frame counts, and the counts
+# are derived -- exactly as protocol.h does it. Changing the link rate
+# then keeps the seconds correct on both sides automatically.
+#
+# SED v3-1 table 4.13 still quotes 3 and 5, which were the counts when
+# the link ran at 1 Hz. At 10 Hz those would be 300 ms and 500 ms, and a
+# Linux machine flushing video exceeds 300 ms while perfectly healthy.
+PI_DEGRADED_SET_MS = 3000
+PI_DEGRADED_CLEAR_MS = 5000
+
+MISS_COUNT_DEGRADED = PI_DEGRADED_SET_MS // SPI_TRANSACTION_PERIOD_MS
+SUCCESS_COUNT_CLEAR_DEGRADED = PI_DEGRADED_CLEAR_MS // SPI_TRANSACTION_PERIOD_MS
+
+assert MISS_COUNT_DEGRADED >= 1 and SUCCESS_COUNT_CLEAR_DEGRADED >= 1, \
+    "degraded thresholds rounded to zero: SPI period longer than the windows"
+assert SUCCESS_COUNT_CLEAR_DEGRADED > MISS_COUNT_DEGRADED, \
+    "clearing the degraded flag must be harder than setting it"
+
+
+# ------------------------------------------- 9. Mode broadcast (POLL)
+#
+# Mirrors protocol.h section 11. The ESP32 tells the Pi what STATE it is
+# in every second, rather than sending edge commands like "start
+# recording": on a link with no handshake and no retransmission a missed
+# command is lost forever, while a missed state broadcast is corrected
+# on the next poll. The Pi reacts idempotently -- if the broadcast says
+# the camera should be at the high rate and it is not, it changes it.
+
+
+class CameraRate(IntEnum):
+    OFF = 0         # not recording
+    SLOW = 1        # ground / standby cadence
+    HIGH = 2        # experiment cadence
+
+
+class LogRate(IntEnum):
+    OFF = 0         # not logging
+    NOMINAL = 1     # SED table 4.15 unified cadence
+    HIGH = 2        # increased in flight, SED 4.8.2.1.3
+
+
+# MSG_POLL payload layout, LEN_POLL = 8 bytes:
+#   [0]     SoftwareMode
+#   [1]     flag bits, below
+#   [2]     CameraRate
+#   [3]     LogRate
+#   [4..7]  mission time, milliseconds, little-endian uint32
+POLL_OFF_MODE = 0
+POLL_OFF_FLAGS = 1
+POLL_OFF_CAM_RATE = 2
+POLL_OFF_LOG_RATE = 3
+POLL_OFF_TIME_MS = 4
+
+POLL_FLAG_SODS = 0x01       # data storage gate, T-180 s
+POLL_FLAG_SOE = 0x02
+POLL_FLAG_LO = 0x04
+POLL_FLAG_FLIGHT = 0x08     # LO or launch detected by the IMU
+POLL_FLAG_DEGRADED = 0x10   # the ESP32's own view of the link
+
+# Bits 6-7 carry the TimeRef, so a scrubbed countdown and a real flight
+# can be told apart in the CSV filenames. There is no spare byte: the
+# payload is 8 and the timestamp needs 4.
+POLL_TIMEREF_SHIFT = 6
+POLL_TIMEREF_MASK = 0xC0
+
+assert POLL_OFF_TIME_MS + 4 == LEN_POLL, \
+    "POLL payload layout does not fill LEN_POLL exactly"

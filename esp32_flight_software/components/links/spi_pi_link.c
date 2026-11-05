@@ -26,7 +26,6 @@ static uint16_t success_count;
 static bool     degraded;
 static int64_t  last_frame_us = INT64_MIN;
 
-static uint8_t  tx_seq;
 
 /* Latched STATUS contents. */
 static bool             status_pending;
@@ -38,9 +37,15 @@ static command_result_t st_result;
 /* ---- framing ---------------------------------------------------------- */
 
 /* Lays out one frame in buf:
-     [0] 0xAA  [1] 0x55  [2] id  [3] len  [4] seq  [5..] payload
+     [0] 0xAA  [1] 0x55  [2] id  [3] len  [4..] payload
      then CRC16 little-endian, then zero padding to SPI_FRAME_LEN.
-   The CRC covers id, len, seq and payload. */
+   The CRC covers id, len and payload -- not the sync bytes, which carry
+   no information, and not itself.
+
+   This is exactly PROTO_OVERHEAD_BYTES (6) of overhead, and exactly
+   what build_frame() in raspberry_pi_software/src/stard/links/framing.py
+   produces. The two are one wire format; a byte added on one side only
+   makes every CRC on the other side fail. */
 static void build_frame(uint8_t *buf, uint8_t id, const uint8_t *payload, uint8_t len)
 {
     memset(buf, 0, SPI_FRAME_LEN);
@@ -48,12 +53,11 @@ static void build_frame(uint8_t *buf, uint8_t id, const uint8_t *payload, uint8_
     buf[1] = PROTO_SYNC1;
     buf[2] = id;
     buf[3] = len;
-    buf[4] = tx_seq++;
-    if (len && payload) memcpy(&buf[5], payload, len);
+    if (len && payload) memcpy(&buf[4], payload, len);
 
-    const uint16_t crc = crc16_ccitt(&buf[2], (size_t)len + 3u);
-    buf[5 + len]     = (uint8_t)(crc & 0xFFu);
-    buf[5 + len + 1] = (uint8_t)(crc >> 8);
+    const uint16_t crc = crc16_ccitt(&buf[2], (size_t)len + 2u);
+    buf[4 + len]     = (uint8_t)(crc & 0xFFu);
+    buf[4 + len + 1] = (uint8_t)(crc >> 8);
 }
 
 /* Validates a received frame in place. Returns the payload length, or -1. */
@@ -63,13 +67,13 @@ static int parse_frame(const uint8_t *buf, uint8_t *id_out, const uint8_t **payl
 
     const uint8_t id  = buf[2];
     const uint8_t len = buf[3];
-    if ((size_t)len + 7u > SPI_FRAME_LEN) return -1;
+    if ((size_t)len + PROTO_OVERHEAD_BYTES > SPI_FRAME_LEN) return -1;
 
-    const uint16_t want = (uint16_t)((uint16_t)buf[5 + len + 1] << 8 | buf[5 + len]);
-    if (crc16_ccitt(&buf[2], (size_t)len + 3u) != want) return -1;
+    const uint16_t want = (uint16_t)((uint16_t)buf[4 + len + 1] << 8 | buf[4 + len]);
+    if (crc16_ccitt(&buf[2], (size_t)len + 2u) != want) return -1;
 
     *id_out  = id;
-    *payload = &buf[5];
+    *payload = &buf[4];
     return (int)len;
 }
 

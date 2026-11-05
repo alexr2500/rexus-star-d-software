@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "esp_err.h"
 
 /* Drives everything on the board that is a plain output: the heaters and
    the two stepper motors. Holds no policy — temperature_control.c decides
@@ -21,6 +22,28 @@ void gpio_driver_pump_direction(bool forward);
    the step interval: the caller spaces the pulses, so a long move cannot
    stall the control loop. */
 void gpio_driver_pump_pulse(void);
+
+/* ---- hardware pulse train, for the NE injection --------------------- *
+ * A software loop cannot emit a fast injection: 2 mL in 3 s is 44,000
+ * steps per second, and bit-banging that would consume the whole
+ * control cycle. These run the STEP pin from the LEDC peripheral
+ * instead, so the pulses are generated in hardware with no CPU cost and
+ * no jitter, and a one-shot timer stops the train after exactly the
+ * requested number.
+ *
+ * gpio_driver_pump_run() returns immediately. Poll gpio_driver_pump_busy()
+ * to know when the dispense is finished. */
+esp_err_t gpio_driver_pump_run(uint32_t pulses, uint32_t pulses_per_s);
+
+/* True while a train is still running. */
+bool gpio_driver_pump_busy(void);
+
+/* Stops the train now. Safe to call when idle. */
+void gpio_driver_pump_abort(void);
+
+/* Pulses emitted by the train that is running or has just finished.
+   Derived from elapsed time, so it is accurate to about one pulse. */
+uint32_t gpio_driver_pump_pulses_done(void);
 
 /* ---- microscope stage, ULN2003 --------------------------------------- *
  * Half-step sequence, 8 states. dir = +1 or -1; any other value is

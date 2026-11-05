@@ -251,10 +251,17 @@ typedef enum {
 #define POLL_OFF_LOG_RATE  3
 #define POLL_OFF_TIME_MS   4
 
-#define POLL_FLAG_SODS     0x01u   /* data storage gate, T-180 s */
-#define POLL_FLAG_SOE      0x02u
-#define POLL_FLAG_LO       0x04u
-#define POLL_FLAG_FLIGHT   0x08u   /* LO or launch detected by the IMU */
+#define POLL_FLAG_SODS      0x01u   /* data storage gate, T-180 s */
+#define POLL_FLAG_SOE       0x02u
+#define POLL_FLAG_LO        0x04u
+#define POLL_FLAG_FLIGHT    0x08u   /* LO or launch detected by the IMU */
+#define POLL_FLAG_DEGRADED  0x10u   /* the ESP's own view of the link */
+
+/* Bits 6-7 carry the time reference, so the Pi can tell a scrubbed
+   countdown from a real flight when it names its CSV files. There is no
+   spare byte for it: LEN_POLL is fixed at 8 and the timestamp needs 4. */
+#define POLL_TIMEREF_SHIFT  6
+#define POLL_TIMEREF_MASK   0xC0u
 
 _Static_assert(POLL_OFF_TIME_MS + 4 == LEN_POLL,
                "MSG_POLL payload layout does not fill LEN_POLL exactly");

@@ -93,6 +93,13 @@ class SpiLink:
         self._mode: protocol.SoftwareMode = protocol.SoftwareMode.MODE_SU
         self._degraded: bool = False
 
+        # Pushed by the ESP32's state broadcast once a second. The Pi
+        # reacts to these idempotently rather than waiting for commands.
+        self._camera_rate: protocol.CameraRate = protocol.CameraRate.OFF
+        self._log_rate: protocol.LogRate = protocol.LogRate.OFF
+        self._sods_active: bool = False
+        self._flight_confirmed: bool = False
+
         self._time_offset_ms: int = 0
         self._time_ref: protocol.TimeRef = protocol.TimeRef.TIME_UNSYNCED
         self._last_poll_monotonic: Optional[int] = None
@@ -147,6 +154,23 @@ class SpiLink:
     def mode(self) -> protocol.SoftwareMode:
         """Mode last reported by the ESP32."""
         return self._mode
+
+    def camera_rate(self) -> protocol.CameraRate:
+        """Capture cadence the ESP32 is asking for. OFF until the first
+        poll arrives, so the Pi never records before being told to."""
+        return self._camera_rate
+
+    def log_rate(self) -> protocol.LogRate:
+        """Logging cadence the ESP32 is asking for."""
+        return self._log_rate
+
+    def sods_active(self) -> bool:
+        """SODS gates data storage and imaging from about T-180 s."""
+        return self._sods_active
+
+    def flight_confirmed(self) -> bool:
+        """LO received, or launch detected by the ESP32's accelerometer."""
+        return self._flight_confirmed
 
     def degraded(self) -> bool:
         """Degraded flag last reported by the ESP32."""
@@ -284,6 +308,10 @@ class SpiLink:
 
         self._mode = poll.mode
         self._degraded = poll.degraded
+        self._camera_rate = poll.camera_rate
+        self._log_rate = poll.log_rate
+        self._sods_active = poll.sods_active
+        self._flight_confirmed = poll.flight_confirmed
 
         # Re-anchor on every poll. This absorbs crystal drift and picks
         # up re-anchoring at SODS and LO with no special case.
@@ -350,3 +378,9 @@ class SpiLink:
             self._spi.close()
         except Exception:
             pass
+
+
+# The class was called UartLink while the link was a serial port. The
+# transport changed to SPI; the role did not. Kept as an alias so older
+# callers and tests keep working rather than failing at import time.
+UartLink = SpiLink

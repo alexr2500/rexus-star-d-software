@@ -87,4 +87,39 @@ esp_err_t imu_driver_init(void)
     /* CTRL3_C first: IF_INC has to be on before any multi-byte read, and
        BDU has to be on before the first sample is latched. */
     err = reg_write(LSM_REG_CTRL3_C,  LSM_CTRL3_C_VAL);
-    if (err != ESP_OK)
+    if (err != ESP_OK) return err;
+    err = reg_write(LSM_REG_CTRL1_XL, LSM_CTRL1_XL_VAL);
+    if (err != ESP_OK) return err;
+    err = reg_write(LSM_REG_CTRL2_G,  LSM_CTRL2_G_VAL);
+    if (err != ESP_OK) return err;
+
+    return reg_write(LSM_REG_INT1_CTRL, LSM_INT1_CTRL_VAL);
+}
+
+uint8_t imu_driver_whoami(void) { return whoami; }
+
+bool imu_driver_data_ready(void)
+{
+    return gpio_get_level(PIN_INT_LSM6DSM) != 0;
+}
+
+esp_err_t imu_driver_read(imu_sample_t *out)
+{
+    if (out == NULL) return ESP_ERR_INVALID_ARG;
+
+    uint8_t b[12];
+    esp_err_t err = reg_read(LSM_REG_OUTX_L_G, b, sizeof b);
+    if (err != ESP_OK) return err;
+
+    /* Little-endian, gyro first, then accelerometer. The cast to int16_t
+       happens after the bytes are assembled in an unsigned type: shifting
+       a signed value into the sign bit is undefined. */
+    out->gx = (int16_t)((uint16_t)b[1]  << 8 | b[0]);
+    out->gy = (int16_t)((uint16_t)b[3]  << 8 | b[2]);
+    out->gz = (int16_t)((uint16_t)b[5]  << 8 | b[4]);
+    out->ax = (int16_t)((uint16_t)b[7]  << 8 | b[6]);
+    out->ay = (int16_t)((uint16_t)b[9]  << 8 | b[8]);
+    out->az = (int16_t)((uint16_t)b[11] << 8 | b[10]);
+
+    return ESP_OK;
+}

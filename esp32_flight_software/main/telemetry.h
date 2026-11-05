@@ -2,6 +2,7 @@
 #define TELEMETRY_H
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "mode_manager.h"    /* software_mode_t — owned there, not modified here */
 #include "protocol.h"
 
@@ -114,5 +115,6 @@ void telemetry_task(void);
 void telemetry_set_mode(software_mode_t mode);
 void telemetry_set_camera_status(camera_status_t status);
 void telemetry_set_ssd_free_gb(uint8_t free_gb);
+void telemetry_set_stepper_activation(bool active);
 
 #endif

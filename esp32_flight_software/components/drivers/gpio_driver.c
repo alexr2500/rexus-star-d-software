@@ -2,6 +2,9 @@
 #include "board_pins.h"
 #include "driver/gpio.h"
 #include "esp_rom_sys.h"       /* esp_rom_delay_us */
+#include "esp_timer.h"
+#include "driver/ledc.h"
+#include <stddef.h>
 
 #define PUMP_PULSE_WIDTH_US 3   /* TMC2209 needs >=100 ns; 3 us is generous
                                    and still far below any step interval. */
@@ -90,6 +93,110 @@ void gpio_driver_pump_pulse(void)
     gpio_set_level(PIN_PUMP_STEP, 1);
     esp_rom_delay_us(PUMP_PULSE_WIDTH_US);
     gpio_set_level(PIN_PUMP_STEP, 0);
+}
+
+/* ---------------------------------------------- pump hardware pulse train */
+
+/* LEDC generates a square wave on the STEP pin. Duty is fixed at 50%,
+   which gives the TMC2209 a far wider pulse than its 100 ns minimum at
+   any rate we use. 4-bit resolution is plenty for a 50% duty and keeps
+   the maximum achievable frequency high. */
+#define PUMP_LEDC_MODE       LEDC_LOW_SPEED_MODE
+#define PUMP_LEDC_TIMER      LEDC_TIMER_0
+#define PUMP_LEDC_CHANNEL    LEDC_CHANNEL_0
+#define PUMP_LEDC_RES_BITS   LEDC_TIMER_4_BIT
+#define PUMP_LEDC_DUTY_HALF  8u            /* 8/16 = 50% at 4-bit */
+
+static esp_timer_handle_t pump_stop_timer;
+static volatile bool      pump_running;
+static uint32_t           pump_target_pulses;
+static uint32_t           pump_rate_hz;
+static int64_t            pump_started_us;
+
+static void pump_stop_now(void)
+{
+    /* Idle level 0: STEP rests low between trains, which is what the
+       driver expects. */
+    (void)ledc_stop(PUMP_LEDC_MODE, PUMP_LEDC_CHANNEL, 0);
+    pump_running = false;
+}
+
+static void pump_timer_cb(void *arg)
+{
+    (void)arg;
+    pump_stop_now();
+}
+
+esp_err_t gpio_driver_pump_run(uint32_t pulses, uint32_t pulses_per_s)
+{
+    if (pulses == 0u || pulses_per_s == 0u) return ESP_ERR_INVALID_ARG;
+    if (pump_running)                       return ESP_ERR_INVALID_STATE;
+
+    ledc_timer_config_t tcfg = {
+        .speed_mode      = PUMP_LEDC_MODE,
+        .duty_resolution = PUMP_LEDC_RES_BITS,
+        .timer_num       = PUMP_LEDC_TIMER,
+        .freq_hz         = pulses_per_s,
+        .clk_cfg         = LEDC_AUTO_CLK,
+    };
+    esp_err_t err = ledc_timer_config(&tcfg);
+    if (err != ESP_OK) return err;
+
+    ledc_channel_config_t ccfg = {
+        .gpio_num   = PIN_PUMP_STEP,
+        .speed_mode = PUMP_LEDC_MODE,
+        .channel    = PUMP_LEDC_CHANNEL,
+        .intr_type  = LEDC_INTR_DISABLE,
+        .timer_sel  = PUMP_LEDC_TIMER,
+        .duty       = PUMP_LEDC_DUTY_HALF,
+        .hpoint     = 0,
+    };
+    err = ledc_channel_config(&ccfg);
+    if (err != ESP_OK) return err;
+
+    if (pump_stop_timer == NULL) {
+        const esp_timer_create_args_t targs = {
+            .callback = pump_timer_cb,
+            .arg      = NULL,
+            .name     = "pump_stop",
+        };
+        err = esp_timer_create(&targs, &pump_stop_timer);
+        if (err != ESP_OK) { pump_stop_now(); return err; }
+    }
+
+    /* Duration for exactly `pulses` cycles. Rounded up by half a period
+       so the last pulse completes rather than being cut in half. */
+    const uint64_t us = ((uint64_t)pulses * 1000000ULL) / pulses_per_s
+                      + (500000ULL / pulses_per_s);
+
+    pump_target_pulses = pulses;
+    pump_rate_hz       = pulses_per_s;
+    pump_started_us    = esp_timer_get_time();
+    pump_running       = true;
+
+    err = esp_timer_start_once(pump_stop_timer, us);
+    if (err != ESP_OK) { pump_stop_now(); return err; }
+
+    return ESP_OK;
+}
+
+bool gpio_driver_pump_busy(void) { return pump_running; }
+
+void gpio_driver_pump_abort(void)
+{
+    if (pump_stop_timer != NULL) (void)esp_timer_stop(pump_stop_timer);
+    pump_stop_now();
+}
+
+uint32_t gpio_driver_pump_pulses_done(void)
+{
+    if (pump_rate_hz == 0u) return 0u;
+
+    const int64_t elapsed_us = esp_timer_get_time() - pump_started_us;
+    if (elapsed_us <= 0) return 0u;
+
+    const uint64_t done = ((uint64_t)elapsed_us * pump_rate_hz) / 1000000ULL;
+    return (done > pump_target_pulses) ? pump_target_pulses : (uint32_t)done;
 }
 
 /* -------------------------------------------------------- microscope stage */

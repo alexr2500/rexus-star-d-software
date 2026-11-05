@@ -4,6 +4,7 @@
 #include "error_manager.h"
 #include "gpio_driver.h"
 #include "spi_pi_link.h"
+#include "rs422_interface.h"
 #include "crc16.h"
 #include "esp_timer.h"
 #include "esp_rom_sys.h"
@@ -33,28 +34,58 @@ static uint32_t test_start_ms;
  * NE dispense
  * FIXME: check injection speeds and quantity
  * ===================================================================== */
-#define PUMP_NL_PER_PULSE       15u      /* 0.015 uL, 1/16 microstep */ //FIXME:
+#define PUMP_NL_PER_PULSE       15u      /* 0.015 uL, 1/16 microstep */
 
-/* FIXME: confirm the dispense volume and duration with the biology team.
-   P.3 asks for 2 mL of phagocytic target to be mixed; whether that is
-   the full NE dispense, and over how long, is not stated in the SED. */
-#define NE_DISPENSE_UL          2000u    /* P.3: mix 2 mL              */
-#define NE_DISPENSE_SECONDS     u      /* TODO: confirm speed/rate of injection ?             */
+/* ---- injection profile ------------------------------------------------
+ * Volume and duration are a pair: changing one without checking the
+ * other against the hardware is how the syringe stalls mid-flight. The
+ * three asserts below check the pair against the three real limits.
+ *
+ * SED CONFLICT, recorded here rather than resolved in code:
+ *   P.3   "shall be able to mix 2mL of the phagocytic target"
+ *   P.17  "shall mix the cells with up to 500uL of phagocytic target
+ *          (a non-zero amount must be injected of at least 100 uL)"
+ * FV-T02's pass criterion follows P.17 ("0-500 uL ... FAIL: any
+ * parameter outside range"), so a 2 mL injection fails its own
+ * verification as written. P.17 and FV-T02 need correcting to match
+ * whichever volume is nominal.
+ *
+ * Candidate profiles, all at 1/16 microstepping on a 10 mm bore and a
+ * 0.6 mm screw:
+ *
+ *   volume   time   flow        motor     verdict
+ *   2000 uL  3 s    48 ml/min   1019 rpm  flow sensor is +-40 ml/min,
+ *                                         and the motor will not turn
+ *                                         that fast under load
+ *   2000 uL  60 s   2 ml/min    42 rpm    fine, but too slow for the
+ *                                         biology per the team
+ *   500 uL   3 s    10 ml/min   212 rpm   fine on every count  <= ACTIVE
+ *
+ * The active pair is the only one that meets the 2-3 s injection the
+ * biology needs AND stays inside the hardware. Switching to 2 mL at
+ * this speed needs a wider-range flow sensor and a faster or
+ * better-geared pump; the asserts will refuse to build until then.
+ */
+#define NE_DISPENSE_UL          500u     /* P.17; see the conflict above */
+#define NE_DISPENSE_SECONDS     3u       /* biology: 2-3 s               */
 
 #define NE_DISPENSE_PULSES      ((NE_DISPENSE_UL * 1000u) / PUMP_NL_PER_PULSE)
-#define PUMP_PULSES_PER_CYCLE   ((NE_DISPENSE_PULSES * SPI_TRANSACTION_PERIOD_MS) \
-                                 / (NE_DISPENSE_SECONDS * 1000u))
+#define NE_DISPENSE_RATE_HZ     (NE_DISPENSE_PULSES / NE_DISPENSE_SECONDS)
 
-/* Spacing inside a burst. 20 us is 50 kHz at the driver, far inside the
-   TMC2209's limit, and the resulting shaft speed is under one turn per
-   second. The whole burst blocks for PULSES_PER_CYCLE * 20 us, which is
-   a few milliseconds of a 100 ms cycle. */
-#define PUMP_PULSE_INTERVAL_US  20u
+/* Derived checks, in the units the limits are actually quoted in. */
+#define NE_FLOW_ML_PER_MIN      ((NE_DISPENSE_UL * 60u) / (NE_DISPENSE_SECONDS * 1000u))
+#define NE_MOTOR_RPM            ((NE_DISPENSE_RATE_HZ * 60u) / 3200u)  /* 3200 ustep/rev */
 
-_Static_assert(PUMP_PULSES_PER_CYCLE > 0u,
-               "dispense is too slow to emit a pulse each cycle");
-_Static_assert((PUMP_PULSES_PER_CYCLE * PUMP_PULSE_INTERVAL_US) < 20000u,
-               "the pump burst would block more than 20 ms of a cycle");
+_Static_assert(NE_DISPENSE_UL <= 2500u,
+               "dispense volume exceeds the 2.5 mL syringe capacity");
+
+_Static_assert(NE_FLOW_ML_PER_MIN <= 40u,
+               "injection exceeds the SLF3S-1300F +-40 ml/min full scale: "
+               "flow would saturate during the one event it must measure");
+
+_Static_assert(NE_MOTOR_RPM <= 400u,
+               "injection needs a shaft speed a NEMA 8 will not hold under "
+               "load; a stall loses steps silently and there is no encoder");
 
 static uint32_t dispense_remaining;
 static bool     stepper_activated;
@@ -62,6 +93,7 @@ static bool     stepper_activated;
 /* ===================================================================== */
 
 static software_mode_t last_mode = MODE_SU;
+static uint8_t         poll_divider;
 
 void mode_executor_init(void)
 {
@@ -74,6 +106,7 @@ void mode_executor_init(void)
     dispense_remaining = 0;
     stepper_activated  = false;
     last_mode          = MODE_SU;
+    poll_divider       = 0;
 }
 
 /* ---- the self test ---------------------------------------------------- */
@@ -139,27 +172,104 @@ bool     mode_executor_stepper_activated(void)  { return stepper_activated; }
 
 static void dispense_step(void)
 {
-    if (dispense_remaining == 0u) {
-        /* Finished: de-energise so the driver is not holding current
-           against a stopped screw for the rest of the flight. */
-        gpio_driver_pump_enable(false);
+    /* The train runs in hardware. All this does each cycle is notice
+       when it has finished and drop the driver current, so the motor is
+       not held against a stopped screw for the rest of the flight. */
+    if (gpio_driver_pump_busy()) {
+        dispense_remaining = NE_DISPENSE_PULSES
+                           - gpio_driver_pump_pulses_done();
         return;
     }
 
-    uint32_t n = PUMP_PULSES_PER_CYCLE;
-    if (n > dispense_remaining) n = dispense_remaining;
-
-    for (uint32_t i = 0; i < n; i++) {
-        gpio_driver_pump_pulse();
-        esp_rom_delay_us(PUMP_PULSE_INTERVAL_US);
+    if (dispense_remaining != 0u) {
+        dispense_remaining = 0u;
+        gpio_driver_pump_enable(false);
     }
-    dispense_remaining -= n;
 }
 
-/* ---- the state broadcast ---------------------------------------------- */
+/* ---- what goes to the Pi each cycle ----------------------------------- *
+ * SED table 4.13: sensor transfer at 10 Hz, status exchange at 1 Hz. One
+ * transaction carries one frame, so SENSOR_DATA goes out every cycle and
+ * POLL takes its place once a second. The Pi needs both: the sensor rows
+ * are the science CSV, the poll is how it learns the mode, the rates and
+ * the mission clock.
+ * ===================================================================== */
 
-static void broadcast(software_mode_t mode, camera_rate_t cam, log_rate_t log,
-                      bool sods, bool soe, bool flight, uint32_t t_ms)
+static uint8_t poll_divider;
+
+/* Little-endian writers. Done by hand rather than memcpy of a struct so
+   the wire layout is visible here and cannot be changed by a compiler
+   padding decision. */
+static void put_u16(uint8_t *p, uint16_t v)
+{
+    p[0] = (uint8_t)(v & 0xFFu);
+    p[1] = (uint8_t)(v >> 8);
+}
+
+static void put_i16(uint8_t *p, int16_t v) { put_u16(p, (uint16_t)v); }
+
+static void put_u32(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)(v & 0xFFu);
+    p[1] = (uint8_t)((v >> 8) & 0xFFu);
+    p[2] = (uint8_t)((v >> 16) & 0xFFu);
+    p[3] = (uint8_t)((v >> 24) & 0xFFu);
+}
+
+/* Mission time is SIGNED on the wire. Countdown time is negative --
+   T-180 s is -180000 -- and the Pi takes abs() of it to name its CSV
+   files. An unsigned field would turn every countdown stamp into a
+   number near 4.29 billion. */
+static void put_i32(uint8_t *p, int32_t v) { put_u32(p, (uint32_t)v); }
+
+/* Fields the Pi unpacks as unsigned cannot carry SENSOR_RAW_INVALID:
+   INT16_MIN would arrive as 32768, a perfectly plausible pressure. Zero
+   is used instead, which no real reading produces. Per-sample validity
+   is NOT in this frame -- the Pi uses status_error_flag. That is an ICD
+   limitation worth recording, not a bug here. */
+static uint16_t as_u16(int16_t v)
+{
+    return (v == SENSOR_RAW_INVALID) ? 0u : (uint16_t)v;
+}
+
+static void send_sensor_frame(const sensor_snapshot_t *s)
+{
+    uint8_t p[LEN_SENSOR_DATA];
+
+    /* Order is fixed by SENSOR_DATA_FORMAT "<hHHhHHHhhhhhhhhI" in
+       raspberry_pi_software/src/stard/links/messages.py. The two must be
+       changed together or every row the Pi logs is nonsense. */
+    put_i16(&p[0],  s->ext_bme_temp);
+    put_u16(&p[2],  as_u16(s->ext_bme_press));
+    put_u16(&p[4],  as_u16(s->ext_bme_hum));
+    put_i16(&p[6],  s->int_bme_temp);
+    put_u16(&p[8],  as_u16(s->int_bme_press));
+    put_u16(&p[10], as_u16(s->int_bme_hum));
+    put_u16(&p[12], as_u16(s->abp_pressure));
+    put_i16(&p[14], s->slf3s_flow);
+    put_i16(&p[16], s->pt100_temp);
+    put_i16(&p[18], s->ax);
+    put_i16(&p[20], s->ay);
+    put_i16(&p[22], s->az);
+    put_i16(&p[24], s->gx);
+    put_i16(&p[26], s->gy);
+    put_i16(&p[28], s->gz);
+    put_u32(&p[30], error_flags_get());
+
+    (void)spi_pi_link_load(MSG_SENSOR_DATA, p, (uint8_t)LEN_SENSOR_DATA);
+}
+
+/* The time reference the Pi stamps its files with. Derived, not stored:
+   there is exactly one place it can be wrong this way. */
+static time_ref_t current_time_ref(bool sods, bool flight)
+{
+    if (flight) return TIME_MISSION;
+    if (sods)   return TIME_COUNTDOWN;
+    return TIME_UNSYNCED;
+}
+
+static void send_poll(software_mode_t mode, camera_rate_t cam, log_rate_t log,
+                      bool sods, bool soe, bool flight, int32_t t_ms)
 {
     uint8_t p[LEN_POLL];
     memset(p, 0, sizeof p);
@@ -169,17 +279,37 @@ static void broadcast(software_mode_t mode, camera_rate_t cam, log_rate_t log,
     p[POLL_OFF_LOG_RATE] = (uint8_t)log;
 
     uint8_t flags = 0;
-    if (sods)   flags |= POLL_FLAG_SODS;
-    if (soe)    flags |= POLL_FLAG_SOE;
-    if (flight) flags |= POLL_FLAG_FLIGHT;
+    if (sods)                        flags |= POLL_FLAG_SODS;
+    if (soe)                         flags |= POLL_FLAG_SOE;
+    if (rs422_LO_get())              flags |= POLL_FLAG_LO;
+    if (flight)                      flags |= POLL_FLAG_FLIGHT;
+    if (spi_pi_link_is_degraded())   flags |= POLL_FLAG_DEGRADED;
+
+    flags |= (uint8_t)(((uint8_t)current_time_ref(sods, flight)
+                        << POLL_TIMEREF_SHIFT) & POLL_TIMEREF_MASK);
     p[POLL_OFF_FLAGS] = flags;
 
-    p[POLL_OFF_TIME_MS + 0] = (uint8_t)(t_ms & 0xFFu);
-    p[POLL_OFF_TIME_MS + 1] = (uint8_t)((t_ms >> 8) & 0xFFu);
-    p[POLL_OFF_TIME_MS + 2] = (uint8_t)((t_ms >> 16) & 0xFFu);
-    p[POLL_OFF_TIME_MS + 3] = (uint8_t)((t_ms >> 24) & 0xFFu);
+    put_i32(&p[POLL_OFF_TIME_MS], t_ms);
 
     (void)spi_pi_link_load(MSG_POLL, p, (uint8_t)LEN_POLL);
+}
+
+static void broadcast(software_mode_t mode, camera_rate_t cam, log_rate_t log,
+                      bool sods, bool soe, bool flight, int32_t t_ms)
+{
+    /* POLL once per second, SENSOR_DATA on the other nine cycles. */
+    if (poll_divider == 0u) {
+        send_poll(mode, cam, log, sods, soe, flight, t_ms);
+    } else {
+        sensor_snapshot_t s;
+        sensors_get(&s);
+        send_sensor_frame(&s);
+    }
+
+    poll_divider++;
+    if ((uint32_t)poll_divider * SPI_TRANSACTION_PERIOD_MS >= POLL_PERIOD_MS) {
+        poll_divider = 0u;
+    }
 }
 
 /* ---- the executor itself ---------------------------------------------- */
@@ -187,7 +317,11 @@ static void broadcast(software_mode_t mode, camera_rate_t cam, log_rate_t log,
 void mode_executor_run(software_mode_t mode, bool sods, bool soe,
                        bool flight_confirmed)
 {
-    const uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    /* TODO: this is uptime, not mission time. Anchoring it so that the
+       countdown runs negative and LO is t=0 is not implemented -- the
+       ESP has no countdown reference yet. The wire field is signed and
+       ready for it; the Pi already handles negatives. */
+    const int32_t now_ms = (int32_t)(esp_timer_get_time() / 1000);
     const bool entered = (mode != last_mode);
 
     /* Rates default to the safe end and are raised by the mode below.
@@ -238,10 +372,18 @@ void mode_executor_run(software_mode_t mode, bool sods, bool soe,
         /* The experiment. Camera to the high rate, logging high, and
            the syringe advances to push liquid through the chamber. */
         if (entered) {
-            dispense_remaining = NE_DISPENSE_PULSES;
             gpio_driver_pump_direction(true);     /* forward = dispense */
             gpio_driver_pump_enable(true);
-            stepper_activated = true;
+            if (gpio_driver_pump_run(NE_DISPENSE_PULSES,
+                                     NE_DISPENSE_RATE_HZ) == ESP_OK) {
+                dispense_remaining = NE_DISPENSE_PULSES;
+                stepper_activated  = true;
+            } else {
+                /* The injection is the experiment. If the train will not
+                   start, the ground has to know immediately. */
+                gpio_driver_pump_enable(false);
+                error_raise(ERR_BIT_FLUIDIC_FAULT);
+            }
         }
         dispense_step();
 
@@ -258,6 +400,7 @@ void mode_executor_run(software_mode_t mode, bool sods, bool soe,
        transition out of NE, so reaching this is already a fault -- but
        a fault must not leave the motor driving. */
     if (last_mode == MODE_NE && mode != MODE_NE) {
+        gpio_driver_pump_abort();
         gpio_driver_pump_enable(false);
         dispense_remaining = 0;
     }
